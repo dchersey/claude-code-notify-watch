@@ -1,5 +1,7 @@
 # claude-code-notify-watch
 
+[![CI](https://github.com/dchersey/claude-code-notify-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/dchersey/claude-code-notify-watch/actions/workflows/ci.yml)
+
 Get a notification **on your Apple Watch** when Claude Code finishes, needs your
 permission, or a subagent completes — from any terminal.
 
