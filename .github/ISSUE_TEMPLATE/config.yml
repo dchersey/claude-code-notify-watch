@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Setup & configuration
+    url: https://github.com/dchersey/claude-code-notify-watch#install-macos
+    about: Installation, watch delivery (Pushover/ntfy/Bark), and tuning are in the README.
