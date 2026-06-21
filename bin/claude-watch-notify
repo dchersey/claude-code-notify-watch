@@ -1,0 +1,87 @@
+#!/bin/bash
+# claude-watch-notify — Claude Code hook → local claude-watch relay.
+#
+# Reads one hook-event JSON object on stdin, maps it to a compact event, and
+# POSTs it to the relay (http://127.0.0.1:4747/claude/event) FULLY DETACHED.
+# It ALWAYS exits 0 immediately, so a slow/down relay can never stall or error
+# Claude Code. Wired from ~/.claude/settings.json hooks (Notification +
+# SubagentStop). Apple-signed /bin/bash + absolute tool paths per global rules.
+
+RELAY_URL="http://127.0.0.1:4747/claude/event"
+CONNECT_TIMEOUT=1
+MAX_TIME=2
+# Resolve tools portably — hooks may run with a minimal PATH, and jq may live
+# under Homebrew rather than /usr/bin.
+JQ="$(command -v jq 2>/dev/null || true)"
+[ -z "$JQ" ] && for p in /opt/homebrew/bin/jq /usr/local/bin/jq /usr/bin/jq; do
+  [ -x "$p" ] && { JQ="$p"; break; }
+done
+CURL="$(command -v curl 2>/dev/null || echo /usr/bin/curl)"
+
+# Read stdin once. Empty → nothing to do.
+INPUT="$(cat 2>/dev/null)"
+[ -z "$INPUT" ] && exit 0
+
+# Need jq and valid JSON; otherwise no-op (never error).
+command -v "$JQ" >/dev/null 2>&1 || exit 0
+printf '%s' "$INPUT" | "$JQ" -e . >/dev/null 2>&1 || exit 0
+
+# Coarse kind first (cheap) so non-actionable events (auth_success, elicitation_*,
+# ...) — and the tab lookup below — are skipped entirely.
+KIND="$(printf '%s' "$INPUT" | "$JQ" -r '
+  ( .hook_event_name // "" ) as $ev | ( .notification_type // "" ) as $nt |
+  if   $ev == "SubagentStop"      then "subagent"
+  elif $nt == "idle_prompt"       then "done"
+  elif $nt == "permission_prompt" then "permission"
+  else "notify" end' 2>/dev/null)"
+case "$KIND" in done|permission|subagent) ;; *) exit 0 ;; esac
+
+# Resolve this pane's zellij tab name (best-effort, bounded; omit on any failure
+# so the hook never stalls). list-panes --json already carries tab_name; match
+# our own $ZELLIJ_PANE_ID (terminal panes only).
+TAB=""
+ZJ="$(command -v zellij 2>/dev/null || echo "$HOME/.local/bin/zellij")"
+if [ -n "${ZELLIJ_PANE_ID:-}" ] && [ -x "$ZJ" ]; then
+  TO="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
+  if [ -n "$TO" ]; then
+    PANES="$("$TO" 2 "$ZJ" action list-panes --json 2>/dev/null)"
+  else
+    PANES="$("$ZJ" action list-panes --json 2>/dev/null)"
+  fi
+  [ -n "$PANES" ] && TAB="$(printf '%s' "$PANES" | "$JQ" -r --arg pid "$ZELLIJ_PANE_ID" \
+    'map(select((.id|tostring)==$pid and (.is_plugin|not)))[0].tab_name // empty' 2>/dev/null)"
+fi
+
+PAYLOAD="$(
+  printf '%s' "$INPUT" | "$JQ" -c --arg kind "$KIND" --arg tab "$TAB" '
+    ( .cwd // "" )                     as $cwd |
+    ( $cwd | split("/") | last // "" ) as $project |
+    ( .session_id // "" )              as $sid |
+    {
+      kind:       $kind,
+      message:    ( .message // "" ),
+      project:    $project,
+      tab:        $tab,
+      cwd:        $cwd,
+      session_id: $sid,
+      agent_type: ( .agent_type // null ),
+      ts:         ( now | floor ),
+      dedup_key:  ( $sid + ":" + $kind )
+    }
+  ' 2>/dev/null
+)"
+[ -z "$PAYLOAD" ] && exit 0
+
+# Fire-and-forget: detached, output discarded, hard time caps so a hung network
+# or down relay can never outlive ~2s and never blocks this script.
+{
+  "$CURL" -sS -X POST "$RELAY_URL" \
+    -H 'Content-Type: application/json' \
+    --connect-timeout "$CONNECT_TIMEOUT" \
+    --max-time "$MAX_TIME" \
+    --data-binary "$PAYLOAD" \
+    >/dev/null 2>&1
+} &
+disown 2>/dev/null
+
+exit 0

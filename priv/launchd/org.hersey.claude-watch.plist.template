@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the Claude Code -> Apple Watch notifier.
+  Boots at login and listens on 127.0.0.1:4747 for POST /claude/event. Push
+  credentials are read from ENV or the macOS Keychain at send time, so no secret
+  is written here. Bind is loopback + outbound is the public internet, so the
+  macOS "Local Network" privacy grant does not apply.
+
+  Placeholders @REPO@, @PATH@, @HOME@ are filled in by install.sh.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>org.hersey.claude-watch</string>
+
+  <!-- boot.sh recompiles if the Elixir/OTP toolchain changed before exec'ing the
+       app, so the service self-heals across upgrades. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@REPO@/priv/launchd/boot.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- elixir needs erl on PATH; launchd's default PATH is minimal. -->
+    <key>PATH</key>
+    <string>@PATH@</string>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>MIX_ENV</key>
+    <string>prod</string>
+    <!-- Optional: pin a delivery backend without editing source. -->
+    <!-- <key>CLAUDE_WATCH_BACKEND</key><string>pushover</string> -->
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>@HOME@/Library/Logs/claude-watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/Library/Logs/claude-watch.log</string>
+</dict>
+</plist>
