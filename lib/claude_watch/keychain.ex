@@ -21,7 +21,8 @@ defmodule ClaudeWatch.Keychain do
     System.cmd("security", ["delete-generic-password", "-s", service], stderr_to_stdout: true)
 
     case System.cmd("security", ["add-generic-password", "-a", account, "-s", service, "-w", key],
-           stderr_to_stdout: true) do
+           stderr_to_stdout: true
+         ) do
       {_, 0} -> :ok
       {out, _} -> {:error, String.trim(out)}
     end
@@ -31,7 +32,8 @@ defmodule ClaudeWatch.Keychain do
 
   defp read(service) do
     case System.cmd("security", ["find-generic-password", "-s", service, "-w"],
-           stderr_to_stdout: true) do
+           stderr_to_stdout: true
+         ) do
       {out, 0} -> String.trim(out)
       _ -> nil
     end
