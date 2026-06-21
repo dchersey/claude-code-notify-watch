@@ -19,8 +19,11 @@ config :claude_watch,
   subagent_suppress_window_ms: 8_000,
   subagent_min_gap_ms: 20_000,
   max_body_len: 200,
+  # HTTP listener bind address. Loopback-only by default; override with
+  # CLAUDE_WATCH_BIND (e.g. "0.0.0.0"). Set shared_secret if you expose it.
+  bind_ip: {127, 0, 0, 1},
   # Optional shared secret for POST /claude/event (X-Claude-Watch-Secret header).
-  # nil = no check (localhost bind is the primary boundary).
+  # nil = no check. Recommended once bind_ip is off-loopback.
   shared_secret: nil
 
 if config_env() == :test do

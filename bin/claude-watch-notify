@@ -7,7 +7,7 @@
 # Claude Code. Wired from ~/.claude/settings.json hooks (Notification +
 # SubagentStop). Apple-signed /bin/bash + absolute tool paths per global rules.
 
-RELAY_URL="http://127.0.0.1:4747/claude/event"
+RELAY_URL="${CLAUDE_WATCH_URL:-http://127.0.0.1:4747/claude/event}"
 CONNECT_TIMEOUT=1
 MAX_TIME=2
 # Resolve tools portably — hooks may run with a minimal PATH, and jq may live
@@ -73,10 +73,22 @@ PAYLOAD="$(
 [ -z "$PAYLOAD" ] && exit 0
 
 # Fire-and-forget: detached, output discarded, hard time caps so a hung network
-# or down relay can never outlive ~2s and never blocks this script.
+# or down relay can never outlive ~2s and never blocks this script. If a shared
+# secret is configured (env, else the claude-watch-shared-secret Keychain item),
+# send it as X-Claude-Watch-Secret so a secret-guarded relay accepts the POST.
+# Resolved inside the detached block so it never delays this script's fast exit.
 {
+  SECRET="${CLAUDE_WATCH_SECRET:-}"
+  if [ -z "$SECRET" ]; then
+    SEC="$(command -v security 2>/dev/null || echo /usr/bin/security)"
+    # $(...) strips the trailing newline `security -w` adds, so the header is clean.
+    [ -x "$SEC" ] && SECRET="$("$SEC" find-generic-password -s claude-watch-shared-secret -w 2>/dev/null)"
+  fi
+  HDR=()
+  [ -n "$SECRET" ] && HDR=(-H "X-Claude-Watch-Secret: $SECRET")
   "$CURL" -sS -X POST "$RELAY_URL" \
     -H 'Content-Type: application/json' \
+    "${HDR[@]}" \
     --connect-timeout "$CONNECT_TIMEOUT" \
     --max-time "$MAX_TIME" \
     --data-binary "$PAYLOAD" \

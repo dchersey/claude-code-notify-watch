@@ -35,6 +35,20 @@ defmodule ClaudeWatch.API.Router do
     end
   end
 
+  # The Claude Code app registers its APNs device token here (used by the "apns"
+  # delivery backend). Reachable over the LAN when bind_ip is {0,0,0,0} — so
+  # protect it with the shared secret.
+  post "/register" do
+    case conn.body_params do
+      %{"device_token" => token} when is_binary(token) and token != "" ->
+        ClaudeWatch.Tokens.put(token, conn.body_params["device_type"] || "ios")
+        send_json(conn, 200, %{ok: true})
+
+      _ ->
+        send_json(conn, 422, %{error: "missing device_token"})
+    end
+  end
+
   match _ do
     send_json(conn, 404, %{error: "not found"})
   end
@@ -63,7 +77,8 @@ defmodule ClaudeWatch.API.Router do
 
   # Guard only the event route; /health stays open. Skipped entirely when no
   # secret is configured (the default).
-  defp check_secret(%Plug.Conn{request_path: "/claude/event"} = conn, _opts) do
+  defp check_secret(%Plug.Conn{request_path: path} = conn, _opts)
+       when path in ["/claude/event", "/register"] do
     case Application.get_env(:claude_watch, :shared_secret) do
       secret when secret in [nil, ""] ->
         conn

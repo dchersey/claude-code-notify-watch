@@ -1,8 +1,9 @@
 defmodule ClaudeWatch.Delivery do
   @moduledoc """
   Pluggable push backend, selected by the `:delivery_backend` config
-  ("log" | "pushover" | "ntfy" | "bark"). The Notifier hands a backend-agnostic
-  message; each adapter maps `priority` (`:normal | :high`) to its own scale.
+  ("log" | "pushover" | "ntfy" | "bark" | "apns"). The Notifier hands a
+  backend-agnostic message; each adapter maps `priority` (`:normal | :high`) to
+  its own scale. ("apns" = native, self-owned APNs straight to your own app.)
   """
 
   @type msg :: %{
@@ -18,7 +19,8 @@ defmodule ClaudeWatch.Delivery do
     "log" => ClaudeWatch.Delivery.Log,
     "ntfy" => ClaudeWatch.Delivery.Ntfy,
     "pushover" => ClaudeWatch.Delivery.Pushover,
-    "bark" => ClaudeWatch.Delivery.Bark
+    "bark" => ClaudeWatch.Delivery.Bark,
+    "apns" => ClaudeWatch.Delivery.Apns
   }
 
   @spec send(msg) :: :ok | {:error, term}

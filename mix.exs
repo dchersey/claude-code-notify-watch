@@ -36,7 +36,8 @@ defmodule ClaudeWatch.MixProject do
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:plug, "~> 1.16"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:pigeon, "~> 2.0"}
     ]
   end
 end
