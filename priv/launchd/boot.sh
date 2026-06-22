@@ -14,6 +14,15 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$REPO" || exit 1
 export MIX_ENV=prod
 
+# Optional local, gitignored overrides (e.g. CLAUDE_WATCH_* env) so a machine can
+# configure the relay without editing tracked files or the LaunchAgent plist.
+if [ -f "$REPO/.env.local" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$REPO/.env.local"
+  set +a
+fi
+
 log() { printf '%s [boot] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
 
 sig="$(elixir --version 2>/dev/null | tr -d '\n')"
