@@ -4,9 +4,10 @@ defmodule ClaudeWatch.Notifier do
   logical event to the configured push backend. Per-key `Process.send_after`
   timers collapse bursts (mirrors `LgaPredictor.Actuator`'s timer coalescing):
 
-    * done       — coalesce per session_id over `:done_window_ms` (latest wins)
+    * done       — delivered immediately (`:done_window_ms` 0; >0 coalesces a burst)
     * permission — short dedup (`:permission_window_ms`); blocking → fast + high priority
-    * subagent   — rate-limited per session (`:subagent_min_gap_ms`)
+    * subagent   — NOT relayed unless `:relay_subagent` is true; then rate-limited
+                   (`:subagent_min_gap_ms`) and suppressed by a trailing "done"
 
   Delivery is best-effort: a failed push logs and is dropped — this process must
   never crash the supervisor over a flaky network or a bad token.
@@ -29,24 +30,30 @@ defmodule ClaudeWatch.Notifier do
 
   @impl true
   def handle_cast({:event, %{kind: kind, session_id: sid} = ev}, state) do
-    key = {kind, sid}
+    cond do
+      # Subagent pings are off by default (noisy); drop unless explicitly enabled.
+      kind == "subagent" and not relay_subagent?() ->
+        {:noreply, state}
 
-    # Warm the zellij tab cache now so its (slow) list-panes refresh overlaps the
-    # debounce window — the tab is usually resolved by the time we deliver.
-    ClaudeWatch.TabCache.warm(ev[:zellij_session], ev[:pane_id])
+      true ->
+        key = {kind, sid}
 
-    # A "done" ends the turn — a subagent that finished just before it (the turn's
-    # last action) is redundant, so suppress any still-pending subagent for this
-    # session. A subagent with no "done" close behind it still fires (a standalone
-    # "subagent finished while Claude keeps working" progress ping).
-    state = if kind == "done", do: cancel(state, {"subagent", sid}), else: state
+        # Warm the zellij tab cache now so its (slow) list-panes refresh overlaps any
+        # debounce window — the tab is usually resolved by the time we deliver.
+        ClaudeWatch.TabCache.warm(ev[:zellij_session], ev[:pane_id])
 
-    delay =
-      if kind == "subagent" and rate_limited?(state, key),
-        do: max(remaining_gap(state, key), delay_for("subagent")),
-        else: delay_for(kind)
+        # A "done" ends the turn — a subagent that finished just before it (the turn's
+        # last action) is redundant, so suppress any still-pending subagent for this
+        # session. (Only relevant when subagents are relayed.)
+        state = if kind == "done", do: cancel(state, {"subagent", sid}), else: state
 
-    {:noreply, arm(state, key, ev, delay)}
+        delay =
+          if kind == "subagent" and rate_limited?(state, key),
+            do: max(remaining_gap(state, key), delay_for("subagent")),
+            else: delay_for(kind)
+
+        {:noreply, arm(state, key, ev, delay)}
+    end
   end
 
   @impl true
@@ -82,9 +89,11 @@ defmodule ClaudeWatch.Notifier do
   end
 
   defp delay_for("permission"), do: cfg(:permission_window_ms, 1_500)
-  defp delay_for("done"), do: cfg(:done_window_ms, 8_000)
+  defp delay_for("done"), do: cfg(:done_window_ms, 0)
   defp delay_for("subagent"), do: cfg(:subagent_suppress_window_ms, 8_000)
   defp delay_for(_), do: 1_000
+
+  defp relay_subagent?, do: cfg(:relay_subagent, false)
 
   defp rate_limited?(state, key) do
     case state.last_sent[key] do

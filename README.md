@@ -60,7 +60,7 @@ ntfy (free/self-hostable) and Bark are drop-in alternatives — set
 |---|---|
 | `Notification` / `idle_prompt` | ✅ `<project>` — done |
 | `Notification` / `permission_prompt` | 🔐 `<project>` — approve? *(high priority)* |
-| `SubagentStop` | 🤖 `<agent>` done — `<project>` |
+| `SubagentStop` | 🤖 `<agent>` done — `<project>` *(off by default)* |
 
 `<project>` is the basename of the session's cwd, so concurrent sessions are
 distinguishable.
@@ -77,19 +77,21 @@ a **background** tab (not just whatever's focused) and survives tab renames/move
 (looked up live, not baked in). Outside zellij the suffix is simply omitted. (No
 zellij changes required; `tab_name` is already in `list-panes` output.)
 
-### subagent suppression
+### subagents (off by default)
 
-A turn's last action is often a subagent, so `SubagentStop` tends to fire right
-before the `done`. A subagent ping is **suppressed when a `done` for the same
-session follows within `subagent_suppress_window_ms` (8s)** — so a subagent only
+Subagent-finished pings are **not relayed by default** — a turn often ends with a
+subagent right before the `done`, so they're mostly noise. Enable them with
+`relay_subagent: true` (or `CLAUDE_WATCH_SUBAGENT=1`). When on, a subagent is
+**suppressed when a `done` for the same session follows within
+`subagent_suppress_window_ms` (8s)** and rate-limited per session, so it only
 buzzes when it finishes mid-job while Claude keeps working.
 
 ## Tuning
 
 In `config/config.exs` (then `./priv/launchd/install.sh` to reload):
 
-- `done_window_ms` (8s), `permission_window_ms` (1.5s) — debounce/coalesce windows.
-- `subagent_suppress_window_ms` (8s) — how long a subagent waits to see if a `done` follows.
+- `done_window_ms` (**0 = immediate**; `CLAUDE_WATCH_DONE_WINDOW_MS`) — set >0 to coalesce a burst of done events. `permission_window_ms` (1.5s) — short dedup.
+- `relay_subagent` (**false**; `CLAUDE_WATCH_SUBAGENT=1`) — relay subagent pings. `subagent_suppress_window_ms` (8s) applies only when they're enabled.
 - `delivery_backend` — `"pushover"` | `"ntfy"` | `"bark"` | `"log"`.
 - `shared_secret` / `CLAUDE_WATCH_SECRET` — optional `X-Claude-Watch-Secret` header on `POST /claude/event` (the listener is already localhost-only).
 

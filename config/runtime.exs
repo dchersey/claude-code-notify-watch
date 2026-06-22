@@ -48,14 +48,20 @@ if config_env() != :test do
     config :claude_watch, :bind_ip, ip
   end
 
-  # Optional tuning: lower the "done" coalesce/debounce window (ms) for snappier
-  # "done" pings (default 8000). Independent of subagent suppression, which keys
-  # off a "done" arriving — not firing — so a small value is safe.
+  # Optional tuning: the "done" coalesce/debounce window (ms); default 0 (immediate).
+  # Set >0 to coalesce a burst of done events per session at the cost of latency.
   if v = System.get_env("CLAUDE_WATCH_DONE_WINDOW_MS") do
     case Integer.parse(v) do
       {ms, _} when ms >= 0 -> config :claude_watch, :done_window_ms, ms
       _ -> :ok
     end
+  end
+
+  # Relay subagent-finished pings (off by default — noisy).
+  case System.get_env("CLAUDE_WATCH_SUBAGENT") do
+    s when s in ["1", "true", "yes", "on"] -> config :claude_watch, :relay_subagent, true
+    s when s in ["0", "false", "no", "off"] -> config :claude_watch, :relay_subagent, false
+    _ -> :ok
   end
 
   # APNs dispatcher (delivery_backend "apns"): configure Pigeon from a .p8 file +

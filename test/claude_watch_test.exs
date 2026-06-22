@@ -67,6 +67,8 @@ defmodule ClaudeWatch.NotifierTest do
   end
 
   test "subagent is suppressed when a done follows for the same session" do
+    Application.put_env(:claude_watch, :relay_subagent, true)
+
     log =
       capture_log([level: :info], fn ->
         start_supervised!(Notifier)
@@ -82,6 +84,8 @@ defmodule ClaudeWatch.NotifierTest do
   end
 
   test "a standalone subagent (no done close behind) still delivers" do
+    Application.put_env(:claude_watch, :relay_subagent, true)
+
     log =
       capture_log([level: :info], fn ->
         start_supervised!(Notifier)
@@ -94,6 +98,8 @@ defmodule ClaudeWatch.NotifierTest do
   end
 
   test "a done for one session does not suppress another session's subagent" do
+    Application.put_env(:claude_watch, :relay_subagent, true)
+
     log =
       capture_log([level: :info], fn ->
         start_supervised!(Notifier)
@@ -105,6 +111,20 @@ defmodule ClaudeWatch.NotifierTest do
     # s1's subagent survives (OTHER's done can't suppress it) → subagent + done.
     assert deliveries(log) == 2
     assert log =~ "🤖"
+  end
+
+  test "subagent is dropped by default (relay_subagent off)" do
+    Application.put_env(:claude_watch, :relay_subagent, false)
+
+    log =
+      capture_log([level: :info], fn ->
+        start_supervised!(Notifier)
+        Notifier.event(ev(%{kind: "subagent", session_id: "s1", agent_type: "Explore"}))
+        Process.sleep(300)
+      end)
+
+    assert deliveries(log) == 0
+    refute log =~ "🤖"
   end
 
   test "tab name is appended to the title when present" do

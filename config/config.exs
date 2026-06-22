@@ -10,12 +10,17 @@ config :claude_watch,
   delivery_backend: "pushover",
   ntfy_base: "https://ntfy.sh",
   bark_server: "https://api.day.app",
-  # Debounce windows (ms) — collapse bursts so the watch isn't spammed.
-  done_window_ms: 8_000,
+  # "done" (idle / ready-for-input) fires immediately — no debounce. Set >0 to
+  # coalesce a burst of done events per session (latest wins) at the cost of
+  # latency. Override at runtime with CLAUDE_WATCH_DONE_WINDOW_MS.
+  done_window_ms: 0,
+  # Permission prompts dedup over a short window (blocking → kept fast).
   permission_window_ms: 1_500,
-  # Hold a subagent-finished event this long; if a "done" for the same session
-  # arrives within it, the subagent was the turn's last action → suppressed (the
-  # "done" covers it). A standalone subagent (no done close behind) still fires.
+  # Subagent-finished pings are NOT relayed by default (noisy). Enable with
+  # relay_subagent: true (or CLAUDE_WATCH_SUBAGENT=1). When on, a subagent is
+  # suppressed if a "done" for the same session follows within
+  # subagent_suppress_window_ms, and rate-limited per session by subagent_min_gap_ms.
+  relay_subagent: false,
   subagent_suppress_window_ms: 8_000,
   subagent_min_gap_ms: 20_000,
   max_body_len: 200,
