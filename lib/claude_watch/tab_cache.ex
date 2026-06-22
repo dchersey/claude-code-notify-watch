@@ -6,11 +6,13 @@ defmodule ClaudeWatch.TabCache do
 
   The hook now just sends its `pane_id` + zellij `session`; this cache runs
   `zellij --session <s> action list-panes --json` OFF the critical path, memoizes
-  the per-session `pane_id => tab_name` map, and refreshes asynchronously. Lookups
-  return instantly (cached, possibly slightly stale — tab assignments are stable)
-  and never block the Notifier. A miss for an unknown pane triggers a bounded
-  background refresh, so a freshly-created pane is picked up within a couple of
-  seconds. Degrades to nil (no tab suffix) when zellij isn't present.
+  the per-session `pane_id => %{tab, slug}` map — the tab name plus the Claude
+  session slug taken from the pane title (Claude sets the terminal title to the
+  session name, e.g. `⠂ apple-watch-apns-delivery`; the leading status glyph is
+  stripped) — and refreshes asynchronously. Lookups return instantly (cached,
+  possibly slightly stale — these are stable) and never block the Notifier. A miss
+  for an unknown pane triggers a bounded background refresh, so a freshly-created
+  pane is picked up within a couple of seconds. Degrades to nil when zellij absent.
   """
   use GenServer
   require Logger
@@ -24,20 +26,20 @@ defmodule ClaudeWatch.TabCache do
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc """
-  Tab name for (session, pane_id), or nil. Instant: returns the cached value and
-  triggers an async refresh when the entry is stale or the pane is unknown. Safe
-  to call when the cache isn't running (returns nil).
+  `%{tab: name | nil, slug: session_name | nil}` for (session, pane_id), or nil.
+  Instant: returns the cached value and triggers an async refresh when the entry
+  is stale or the pane is unknown. Safe to call when the cache isn't running.
   """
-  def tab(session, pane_id) when is_binary(session) and is_binary(pane_id) do
+  def info(session, pane_id) when is_binary(session) and is_binary(pane_id) do
     case GenServer.whereis(__MODULE__) do
       nil -> nil
-      pid -> GenServer.call(pid, {:tab, session, pane_id})
+      pid -> GenServer.call(pid, {:info, session, pane_id})
     end
   catch
     :exit, _ -> nil
   end
 
-  def tab(_, _), do: nil
+  def info(_, _), do: nil
 
   @doc "Pre-warm a session's cache (cast; non-blocking). No-op if not running."
   def warm(session, pane_id) when is_binary(session) and is_binary(pane_id) do
@@ -57,7 +59,7 @@ defmodule ClaudeWatch.TabCache do
   end
 
   @impl true
-  def handle_call({:tab, session, pane_id}, _from, state) do
+  def handle_call({:info, session, pane_id}, _from, state) do
     entry = state.sessions[session]
     state = if needs_refresh?(entry, pane_id), do: trigger(state, session), else: state
     {:reply, entry && Map.get(entry.panes, pane_id), state}
@@ -124,16 +126,29 @@ defmodule ClaudeWatch.TabCache do
   defp parse(json) do
     case Jason.decode(json) do
       {:ok, panes} when is_list(panes) ->
-        for %{"id" => id, "tab_name" => t} = p <- panes,
+        for %{"id" => id} = p <- panes,
             p["is_plugin"] != true,
-            is_binary(t) and t != "",
             into: %{},
-            do: {to_string(id), t}
+            do: {to_string(id), %{tab: tab_of(p), slug: clean_title(p["title"])}}
 
       _ ->
         :error
     end
   end
+
+  defp tab_of(%{"tab_name" => t}) when is_binary(t) and t != "", do: t
+  defp tab_of(_), do: nil
+
+  # Claude sets the pane title to the session name with a leading status glyph
+  # (e.g. "✳ " or a braille spinner "⠂ "). Strip leading non-letter/-number chars.
+  defp clean_title(title) when is_binary(title) do
+    case title |> String.replace(~r/^[^\p{L}\p{N}]+/u, "") |> String.trim() do
+      "" -> nil
+      s -> s
+    end
+  end
+
+  defp clean_title(_), do: nil
 
   defp zellij_bin do
     [

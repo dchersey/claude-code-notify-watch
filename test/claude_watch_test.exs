@@ -127,7 +127,7 @@ defmodule ClaudeWatch.NotifierTest do
     refute log =~ "🤖"
   end
 
-  test "tab name is appended to the title when present" do
+  test "label is <tab>:<project> when no session slug is available" do
     log =
       capture_log([level: :info], fn ->
         start_supervised!(Notifier)
@@ -135,6 +135,35 @@ defmodule ClaudeWatch.NotifierTest do
         Process.sleep(200)
       end)
 
-    assert log =~ "zellij:A"
+    assert log =~ "A:zellij"
+  end
+
+  test "label uses the session slug from TabCache when available (<tab>:<slug>)" do
+    Application.put_env(:claude_watch, :done_window_ms, 200)
+
+    start_supervised!(
+      {ClaudeWatch.TabCache,
+       fetcher: fn _ -> %{"7" => %{tab: "A", slug: "apple-watch-apns-delivery"}} end}
+    )
+
+    log =
+      capture_log([level: :info], fn ->
+        start_supervised!(Notifier)
+
+        Notifier.event(
+          ev(%{
+            kind: "done",
+            session_id: "s1",
+            project: "zellij",
+            zellij_session: "z",
+            pane_id: "7"
+          })
+        )
+
+        Process.sleep(400)
+      end)
+
+    # Slug wins over the project ("zellij") in the label.
+    assert log =~ "A:apple-watch-apns-delivery"
   end
 end

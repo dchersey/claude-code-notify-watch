@@ -11,40 +11,43 @@ defmodule ClaudeWatch.TabCacheTest do
   end
 
   test "is safe (returns nil / :ok) when the cache isn't running" do
-    assert TabCache.tab("sess", "1") == nil
+    assert TabCache.info("sess", "1") == nil
     assert TabCache.warm("sess", "1") == :ok
   end
 
   test "nil session or pane_id short-circuits to nil without touching the server" do
-    assert TabCache.tab(nil, "1") == nil
-    assert TabCache.tab("sess", nil) == nil
+    assert TabCache.info(nil, "1") == nil
+    assert TabCache.info("sess", nil) == nil
   end
 
-  test "resolves pane_id -> tab via the fetcher and caches it" do
+  test "resolves pane_id -> %{tab, slug} via the fetcher and caches it" do
     me = self()
 
     fetcher = fn session ->
       send(me, {:fetched, session})
-      %{"5" => "A", "6" => "B"}
+      %{"5" => %{tab: "A", slug: "apple-watch-apns-delivery"}, "6" => %{tab: "B", slug: nil}}
     end
 
     start_supervised!({TabCache, fetcher: fetcher})
 
     # Cold: returns nil now but triggers an async refresh.
-    assert TabCache.tab("sess", "5") == nil
+    assert TabCache.info("sess", "5") == nil
     assert_receive {:fetched, "sess"}, 1_000
 
     # Once the refresh lands, panes resolve from cache.
-    assert eventually(fn -> TabCache.tab("sess", "5") == "A" end)
-    assert TabCache.tab("sess", "6") == "B"
+    assert eventually(fn ->
+             TabCache.info("sess", "5") == %{tab: "A", slug: "apple-watch-apns-delivery"}
+           end)
+
+    assert TabCache.info("sess", "6") == %{tab: "B", slug: nil}
     # Unknown pane in a fresh map → nil (no crash).
-    assert TabCache.tab("sess", "999") == nil
+    assert TabCache.info("sess", "999") == nil
   end
 
   test "a fetcher error leaves the cache empty (nil), not crashing" do
     start_supervised!({TabCache, fetcher: fn _ -> :error end})
-    assert TabCache.tab("sess", "5") == nil
+    assert TabCache.info("sess", "5") == nil
     Process.sleep(50)
-    assert TabCache.tab("sess", "5") == nil
+    assert TabCache.info("sess", "5") == nil
   end
 end

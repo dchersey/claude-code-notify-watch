@@ -58,24 +58,25 @@ ntfy (free/self-hostable) and Bark are drop-in alternatives — set
 
 | Claude Code hook | Notification |
 |---|---|
-| `Notification` / `idle_prompt` | ✅ `<project>` — done |
-| `Notification` / `permission_prompt` | 🔐 `<project>` — approve? *(high priority)* |
-| `SubagentStop` | 🤖 `<agent>` done — `<project>` *(off by default)* |
+| `Notification` / `idle_prompt` | ✅ `<tab>:<session>` — done |
+| `Notification` / `permission_prompt` | 🔐 `<tab>:<session>` — approve? *(high priority)* |
+| `SubagentStop` | 🤖 `<agent>` done — `<tab>:<session>` *(off by default)* |
 
-`<project>` is the basename of the session's cwd, so concurrent sessions are
-distinguishable.
+`<tab>:<session>` identifies which session needs you (see below); it falls back to
+the project folder when no session name is known.
 
-### zellij tab name
+### session label
 
-If the session runs inside [zellij](https://zellij.dev), the **tab name is
-appended** — `<project>:<tab>`, e.g. `🔐 zellij:A — approve?`. The hook sends its
-`$ZELLIJ_PANE_ID` + session and the **relay** resolves the tab from
-`zellij action list-panes --json`, cached per session and refreshed
-asynchronously. Keeping that ~2s `list-panes` call off the hook's path means the
-hook stays instant (no added notification lag) while the tab is still correct for
-a **background** tab (not just whatever's focused) and survives tab renames/moves
-(looked up live, not baked in). Outside zellij the suffix is simply omitted. (No
-zellij changes required; `tab_name` is already in `list-panes` output.)
+The notification is titled `<tab>:<session>` — e.g. `🔐 A:apple-watch-apns-delivery
+— approve?`. When running inside [zellij](https://zellij.dev), `<tab>` is the tab
+name and `<session>` is the **Claude session name** (Claude sets the pane title to
+it). With many sessions open, the session name pinpoints which one needs you far
+better than the folder. The hook sends its `$ZELLIJ_PANE_ID` + session; the
+**relay** resolves both from `zellij action list-panes --json` (the pane's
+`tab_name` + `title`), cached per session and refreshed asynchronously — so the
+hook stays instant. It falls back to `<tab>:<project-folder>`, then just the folder
+outside zellij. (The first notification from a brand-new session/pane may show the
+folder until the cache warms; long session names are truncated.)
 
 ### subagents (off by default)
 

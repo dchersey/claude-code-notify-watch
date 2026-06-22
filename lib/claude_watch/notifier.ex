@@ -135,17 +135,28 @@ defmodule ClaudeWatch.Notifier do
 
   defp format(%{message: msg} = ev), do: {label(ev), body_text(msg, "")}
 
-  # "<project>:<tab>" when the zellij tab is known, else just "<project>". The tab
-  # is resolved live from zellij (cached in ClaudeWatch.TabCache via pane_id +
-  # zellij_session), falling back to a hook-supplied `tab` if present.
+  # "<tab>:<name>" where name is the Claude session slug (from the pane title,
+  # resolved live + cached in ClaudeWatch.TabCache) when known, else the project
+  # (folder) — e.g. "A:apple-watch-apns-delivery", or "A:zellij" as a fallback.
+  # The session slug distinguishes sessions far better than the folder when many
+  # share a directory. Drops to just "<name>" outside zellij.
   defp label(ev) do
-    base = ev[:project] || "Claude"
+    info = ClaudeWatch.TabCache.info(ev[:zellij_session], ev[:pane_id])
+    tab = (info && info.tab) || ev[:tab]
+    name = clamp((info && info.slug) || ev[:project] || "Claude", 32)
 
-    case ClaudeWatch.TabCache.tab(ev[:zellij_session], ev[:pane_id]) || ev[:tab] do
-      t when is_binary(t) and t != "" -> "#{base}:#{t}"
-      _ -> base
+    case tab do
+      t when is_binary(t) and t != "" -> "#{t}:#{name}"
+      _ -> name
     end
   end
+
+  # Cap the label name so a long session summary still fits a notification.
+  defp clamp(s, max) when is_binary(s) and byte_size(s) > 0 do
+    if String.length(s) > max, do: String.slice(s, 0, max - 1) <> "…", else: s
+  end
+
+  defp clamp(s, _), do: s
 
   # Use the message when present, else a sensible per-kind default (Pushover
   # requires a non-empty message, and it's nicer than echoing the title).
