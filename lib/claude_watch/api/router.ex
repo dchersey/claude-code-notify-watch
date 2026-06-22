@@ -61,7 +61,11 @@ defmodule ClaudeWatch.API.Router do
        kind: kind,
        message: str(p["message"]),
        project: str(p["project"]),
+       # tab kept as a fallback; the relay normally resolves it from pane_id +
+       # zellij_session via ClaudeWatch.TabCache (keeps the hook fast).
        tab: str(p["tab"]),
+       pane_id: str(p["pane_id"]),
+       zellij_session: str(p["zellij_session"]),
        cwd: str(p["cwd"]),
        session_id: str(p["session_id"]) || "unknown",
        agent_type: str(p["agent_type"]),

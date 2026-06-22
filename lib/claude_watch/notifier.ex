@@ -31,6 +31,10 @@ defmodule ClaudeWatch.Notifier do
   def handle_cast({:event, %{kind: kind, session_id: sid} = ev}, state) do
     key = {kind, sid}
 
+    # Warm the zellij tab cache now so its (slow) list-panes refresh overlaps the
+    # debounce window — the tab is usually resolved by the time we deliver.
+    ClaudeWatch.TabCache.warm(ev[:zellij_session], ev[:pane_id])
+
     # A "done" ends the turn — a subagent that finished just before it (the turn's
     # last action) is redundant, so suppress any still-pending subagent for this
     # session. A subagent with no "done" close behind it still fires (a standalone
@@ -122,11 +126,13 @@ defmodule ClaudeWatch.Notifier do
 
   defp format(%{message: msg} = ev), do: {label(ev), body_text(msg, "")}
 
-  # "<project>:<tab>" when the zellij tab is known, else just "<project>".
+  # "<project>:<tab>" when the zellij tab is known, else just "<project>". The tab
+  # is resolved live from zellij (cached in ClaudeWatch.TabCache via pane_id +
+  # zellij_session), falling back to a hook-supplied `tab` if present.
   defp label(ev) do
     base = ev[:project] || "Claude"
 
-    case ev[:tab] do
+    case ClaudeWatch.TabCache.tab(ev[:zellij_session], ev[:pane_id]) || ev[:tab] do
       t when is_binary(t) and t != "" -> "#{base}:#{t}"
       _ -> base
     end

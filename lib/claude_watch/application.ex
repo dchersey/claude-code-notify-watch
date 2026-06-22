@@ -14,7 +14,7 @@ defmodule ClaudeWatch.Application do
         port = Application.get_env(:claude_watch, :api_port, 4747)
         ip = Application.get_env(:claude_watch, :bind_ip, {127, 0, 0, 1})
 
-        ([ClaudeWatch.Notifier, ClaudeWatch.Tokens] ++ maybe_apns()) ++
+        ([ClaudeWatch.Notifier, ClaudeWatch.Tokens, ClaudeWatch.TabCache] ++ maybe_apns()) ++
           [{Bandit, plug: ClaudeWatch.API.Router, scheme: :http, ip: ip, port: port}]
       else
         []

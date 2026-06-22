@@ -68,13 +68,14 @@ distinguishable.
 ### zellij tab name
 
 If the session runs inside [zellij](https://zellij.dev), the **tab name is
-appended** — `<project>:<tab>`, e.g. `🔐 zellij:A — approve?`. The hook resolves
-it from `zellij action list-panes --json` matched on `$ZELLIJ_PANE_ID`, so it's
-correct even for a **background** tab (not just whatever's focused), and it
-survives tab renames/moves since it's looked up live per event. Outside zellij
-the suffix is simply omitted — the lookup is bounded and dropped on any failure,
-so it never blocks. (No zellij changes required; `tab_name` is already in
-`list-panes` output.)
+appended** — `<project>:<tab>`, e.g. `🔐 zellij:A — approve?`. The hook sends its
+`$ZELLIJ_PANE_ID` + session and the **relay** resolves the tab from
+`zellij action list-panes --json`, cached per session and refreshed
+asynchronously. Keeping that ~2s `list-panes` call off the hook's path means the
+hook stays instant (no added notification lag) while the tab is still correct for
+a **background** tab (not just whatever's focused) and survives tab renames/moves
+(looked up live, not baked in). Outside zellij the suffix is simply omitted. (No
+zellij changes required; `tab_name` is already in `list-panes` output.)
 
 ### subagent suppression
 
@@ -95,8 +96,8 @@ In `config/config.exs` (then `./priv/launchd/install.sh` to reload):
 ## How it works
 
 - **Capture** — `~/.claude/settings.json` hooks (`Notification` + `SubagentStop`)
-  run `claude-watch-notify`, which maps the event to `{kind, project, tab, …}` and
-  POSTs it to the relay, fully detached.
+  run `claude-watch-notify`, which maps the event to `{kind, project, pane_id, …}`
+  and POSTs it to the relay, fully detached (and instant — no zellij call).
 - **Relay** — an Elixir/OTP app (Bandit on `127.0.0.1:4747`): a `Notifier`
   GenServer debounces per session, then a pluggable `Delivery` backend pushes.
   Credentials come from the macOS Keychain (or env), always trimmed.

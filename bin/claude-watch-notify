@@ -27,7 +27,7 @@ command -v "$JQ" >/dev/null 2>&1 || exit 0
 printf '%s' "$INPUT" | "$JQ" -e . >/dev/null 2>&1 || exit 0
 
 # Coarse kind first (cheap) so non-actionable events (auth_success, elicitation_*,
-# ...) — and the tab lookup below — are skipped entirely.
+# ...) are skipped entirely.
 KIND="$(printf '%s' "$INPUT" | "$JQ" -r '
   ( .hook_event_name // "" ) as $ev | ( .notification_type // "" ) as $nt |
   if   $ev == "SubagentStop"      then "subagent"
@@ -36,37 +36,29 @@ KIND="$(printf '%s' "$INPUT" | "$JQ" -r '
   else "notify" end' 2>/dev/null)"
 case "$KIND" in done|permission|subagent) ;; *) exit 0 ;; esac
 
-# Resolve this pane's zellij tab name (best-effort, bounded; omit on any failure
-# so the hook never stalls). list-panes --json already carries tab_name; match
-# our own $ZELLIJ_PANE_ID (terminal panes only).
-TAB=""
-ZJ="$(command -v zellij 2>/dev/null || echo "$HOME/.local/bin/zellij")"
-if [ -n "${ZELLIJ_PANE_ID:-}" ] && [ -x "$ZJ" ]; then
-  TO="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
-  if [ -n "$TO" ]; then
-    PANES="$("$TO" 2 "$ZJ" action list-panes --json 2>/dev/null)"
-  else
-    PANES="$("$ZJ" action list-panes --json 2>/dev/null)"
-  fi
-  [ -n "$PANES" ] && TAB="$(printf '%s' "$PANES" | "$JQ" -r --arg pid "$ZELLIJ_PANE_ID" \
-    'map(select((.id|tostring)==$pid and (.is_plugin|not)))[0].tab_name // empty' 2>/dev/null)"
-fi
-
+# Send this pane's zellij identity (pane id + session); the RELAY resolves the tab
+# name from these (cached). Keeps the hook INSTANT — no `zellij list-panes` here,
+# which takes ~2s in a busy session (it raced the old timeout, dropping the tab,
+# and added ~2s of notification lag).
 PAYLOAD="$(
-  printf '%s' "$INPUT" | "$JQ" -c --arg kind "$KIND" --arg tab "$TAB" '
+  printf '%s' "$INPUT" | "$JQ" -c \
+    --arg kind "$KIND" \
+    --arg pid "${ZELLIJ_PANE_ID:-}" \
+    --arg zsession "${ZELLIJ_SESSION_NAME:-}" '
     ( .cwd // "" )                     as $cwd |
     ( $cwd | split("/") | last // "" ) as $project |
     ( .session_id // "" )              as $sid |
     {
-      kind:       $kind,
-      message:    ( .message // "" ),
-      project:    $project,
-      tab:        $tab,
-      cwd:        $cwd,
-      session_id: $sid,
-      agent_type: ( .agent_type // null ),
-      ts:         ( now | floor ),
-      dedup_key:  ( $sid + ":" + $kind )
+      kind:           $kind,
+      message:        ( .message // "" ),
+      project:        $project,
+      pane_id:        $pid,
+      zellij_session: $zsession,
+      cwd:            $cwd,
+      session_id:     $sid,
+      agent_type:     ( .agent_type // null ),
+      ts:             ( now | floor ),
+      dedup_key:      ( $sid + ":" + $kind )
     }
   ' 2>/dev/null
 )"
