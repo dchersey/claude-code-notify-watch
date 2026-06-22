@@ -48,6 +48,16 @@ if config_env() != :test do
     config :claude_watch, :bind_ip, ip
   end
 
+  # Optional tuning: lower the "done" coalesce/debounce window (ms) for snappier
+  # "done" pings (default 8000). Independent of subagent suppression, which keys
+  # off a "done" arriving — not firing — so a small value is safe.
+  if v = System.get_env("CLAUDE_WATCH_DONE_WINDOW_MS") do
+    case Integer.parse(v) do
+      {ms, _} when ms >= 0 -> config :claude_watch, :done_window_ms, ms
+      _ -> :ok
+    end
+  end
+
   # APNs dispatcher (delivery_backend "apns"): configure Pigeon from a .p8 file +
   # key id / team id (env, else login Keychain). Skipped unless the .p8 exists, so
   # the relay still boots on pushover/ntfy/log with no APNs configured. Always :prod.
