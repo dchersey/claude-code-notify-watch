@@ -13,7 +13,7 @@ defmodule ClaudeWatch.Delivery.Apns do
   require Logger
 
   @impl true
-  def send(%{title: title, body: body, priority: priority}) do
+  def send(%{title: title, body: body, priority: priority} = msg) do
     case ClaudeWatch.Tokens.all() do
       [] ->
         Logger.warning(
@@ -25,7 +25,8 @@ defmodule ClaudeWatch.Delivery.Apns do
       tokens ->
         case Application.get_env(:claude_watch, :apns_topic) do
           topic when is_binary(topic) and topic != "" ->
-            results = Enum.map(tokens, &push_one(&1, title, body, priority, topic))
+            collapse_id = msg[:collapse_id]
+            results = Enum.map(tokens, &push_one(&1, title, body, priority, topic, collapse_id))
             if Enum.any?(results, &(&1 == :ok)), do: :ok, else: {:error, :all_failed}
 
           _ ->
@@ -40,7 +41,7 @@ defmodule ClaudeWatch.Delivery.Apns do
     e -> {:error, e}
   end
 
-  defp push_one(token, title, body, priority, topic) do
+  defp push_one(token, title, body, priority, topic, collapse_id) do
     import Pigeon.APNS.Notification
 
     notification =
@@ -48,6 +49,7 @@ defmodule ClaudeWatch.Delivery.Apns do
       |> put_alert(%{"title" => title, "body" => body})
       |> put_sound("default")
       |> put_custom(%{"interruption-level" => level(priority)})
+      |> collapse(collapse_id)
 
     case ClaudeWatch.APNS.push(notification) do
       %Pigeon.APNS.Notification{response: :success} ->
@@ -67,6 +69,13 @@ defmodule ClaudeWatch.Delivery.Apns do
         {:error, :unexpected}
     end
   end
+
+  # Collapse same-session notifications into one (latest replaces prior, via the
+  # apns-collapse-id header) so a session never stacks on the lock screen / watch.
+  defp collapse(notification, id) when is_binary(id) and id != "",
+    do: %{notification | collapse_id: id}
+
+  defp collapse(notification, _), do: notification
 
   # permission is blocking → time-sensitive (breaks through Focus); else active.
   defp level(:high), do: "time-sensitive"

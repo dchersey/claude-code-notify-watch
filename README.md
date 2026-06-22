@@ -79,6 +79,16 @@ outside zellij. (Only the **first** notification from a brand-new session/pane i
 briefly held — polled until the name resolves, capped by `cold_label_max_ms`;
 everything after is immediate. Long session names are truncated.)
 
+### keeping it tidy
+
+Each session collapses to a single notification — a new ping **replaces** that
+session's previous one (via `apns-collapse-id`, keyed by session) instead of
+stacking, so a busy session won't pile up on your lock screen or watch. For fully
+**transient** alerts (nothing to clear at all), set the app under iOS Settings →
+Notifications to **Banner Style: Temporary** with **Notification Center** (and
+Lock Screen) **off** — delivered notifications otherwise persist until dismissed;
+no push flag auto-expires them.
+
 ### subagents (off by default)
 
 Subagent-finished pings are **not relayed by default** — a turn often ends with a

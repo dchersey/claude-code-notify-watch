@@ -7,10 +7,12 @@ defmodule ClaudeWatch.Delivery do
   """
 
   @type msg :: %{
-          title: String.t(),
-          body: String.t(),
-          kind: String.t(),
-          priority: :normal | :high
+          :title => String.t(),
+          :body => String.t(),
+          :kind => String.t(),
+          :priority => :normal | :high,
+          # APNs collapse id (per session); other backends ignore it.
+          optional(:collapse_id) => String.t() | nil
         }
 
   @callback send(msg) :: :ok | {:error, term}

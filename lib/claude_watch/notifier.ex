@@ -151,7 +151,17 @@ defmodule ClaudeWatch.Notifier do
   defp deliver(ev) do
     {title, body0} = format(ev)
     body = if body0 in [nil, ""], do: title, else: body0
-    msg = %{title: title, body: body, kind: ev.kind, priority: priority_for(ev.kind)}
+
+    # collapse_id = the Claude session, so each session shows a single notification
+    # (the latest replaces the prior) instead of stacking. Backends that don't
+    # support collapsing ignore it.
+    msg = %{
+      title: title,
+      body: body,
+      kind: ev.kind,
+      priority: priority_for(ev.kind),
+      collapse_id: ev[:session_id]
+    }
 
     case Delivery.send(msg) do
       :ok ->
