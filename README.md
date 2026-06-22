@@ -75,8 +75,9 @@ better than the folder. The hook sends its `$ZELLIJ_PANE_ID` + session; the
 **relay** resolves both from `zellij action list-panes --json` (the pane's
 `tab_name` + `title`), cached per session and refreshed asynchronously — so the
 hook stays instant. It falls back to `<tab>:<project-folder>`, then just the folder
-outside zellij. (The first notification from a brand-new session/pane may show the
-folder until the cache warms; long session names are truncated.)
+outside zellij. (Only the **first** notification from a brand-new session/pane is
+briefly held — polled until the name resolves, capped by `cold_label_max_ms`;
+everything after is immediate. Long session names are truncated.)
 
 ### subagents (off by default)
 

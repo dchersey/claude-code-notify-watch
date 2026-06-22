@@ -57,6 +57,15 @@ if config_env() != :test do
     end
   end
 
+  # Optional tuning: cap on how long the first notification for an as-yet-unresolved
+  # zellij pane is held while its session-name label resolves (default 5000ms).
+  if v = System.get_env("CLAUDE_WATCH_COLD_LABEL_MAX_MS") do
+    case Integer.parse(v) do
+      {ms, _} when ms >= 0 -> config :claude_watch, :cold_label_max_ms, ms
+      _ -> :ok
+    end
+  end
+
   # Relay subagent-finished pings (off by default — noisy).
   case System.get_env("CLAUDE_WATCH_SUBAGENT") do
     s when s in ["1", "true", "yes", "on"] -> config :claude_watch, :relay_subagent, true

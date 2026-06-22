@@ -9,6 +9,10 @@ defmodule ClaudeWatch.Notifier do
     * subagent   — NOT relayed unless `:relay_subagent` is true; then rate-limited
                    (`:subagent_min_gap_ms`) and suppressed by a trailing "done"
 
+  The first event for an as-yet-unresolved zellij pane is held and polled until its
+  `<tab>:<session>` label resolves (capped by `:cold_label_max_ms`), then delivered;
+  warm panes and non-zellij events deliver on their normal schedule.
+
   Delivery is best-effort: a failed push logs and is dropped — this process must
   never crash the supervisor over a flaky network or a bad token.
   """
@@ -17,6 +21,9 @@ defmodule ClaudeWatch.Notifier do
   require Logger
 
   alias ClaudeWatch.Delivery
+
+  # Poll interval while holding a cold event until its session-name label resolves.
+  @poll_ms 250
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -38,19 +45,29 @@ defmodule ClaudeWatch.Notifier do
       true ->
         key = {kind, sid}
 
-        # Warm the zellij tab cache now so its (slow) list-panes refresh overlaps any
-        # debounce window — the tab is usually resolved by the time we deliver.
-        ClaudeWatch.TabCache.warm(ev[:zellij_session], ev[:pane_id])
+        # Look up the cached label now; this also triggers an async refresh when the
+        # pane isn't cached yet, so the slow zellij lookup overlaps our delay below.
+        info = ClaudeWatch.TabCache.info(ev[:zellij_session], ev[:pane_id])
 
         # A "done" ends the turn — a subagent that finished just before it (the turn's
         # last action) is redundant, so suppress any still-pending subagent for this
         # session. (Only relevant when subagents are relayed.)
         state = if kind == "done", do: cancel(state, {"subagent", sid}), else: state
 
+        # The FIRST event for a not-yet-resolved zellij pane is held and polled until
+        # its session-name label lands (capped by :cold_label_max_ms), so it carries
+        # "<tab>:<session>" rather than just the folder. Warm panes + non-zellij
+        # events keep their normal (often immediate) schedule.
+        {ev, base} =
+          if cold_label?(ev, info),
+            do:
+              {Map.put(ev, :__label_deadline, mono() + cfg(:cold_label_max_ms, 5_000)), @poll_ms},
+            else: {ev, delay_for(kind)}
+
         delay =
           if kind == "subagent" and rate_limited?(state, key),
-            do: max(remaining_gap(state, key), delay_for("subagent")),
-            else: delay_for(kind)
+            do: max(remaining_gap(state, key), base),
+            else: base
 
         {:noreply, arm(state, key, ev, delay)}
     end
@@ -61,15 +78,18 @@ defmodule ClaudeWatch.Notifier do
     {ev, pending} = Map.pop(state.pending, key)
     state = %{state | pending: pending, timers: Map.delete(state.timers, key)}
 
-    state =
-      if ev do
-        deliver(ev)
-        %{state | last_sent: Map.put(state.last_sent, key, mono())}
-      else
-        state
-      end
+    cond do
+      is_nil(ev) ->
+        {:noreply, state}
 
-    {:noreply, state}
+      # Still holding for the session-name label (within deadline) → poll again.
+      label_pending?(ev) ->
+        {:noreply, arm(state, key, ev, @poll_ms)}
+
+      true ->
+        deliver(ev)
+        {:noreply, %{state | last_sent: Map.put(state.last_sent, key, mono())}}
+    end
   end
 
   ## internals
@@ -94,6 +114,26 @@ defmodule ClaudeWatch.Notifier do
   defp delay_for(_), do: 1_000
 
   defp relay_subagent?, do: cfg(:relay_subagent, false)
+
+  # A first event worth holding for its label: a zellij pane (session + pane id)
+  # whose label isn't cached yet.
+  defp cold_label?(ev, info),
+    do: is_nil(info) and present?(ev[:zellij_session]) and present?(ev[:pane_id])
+
+  # True while a held event's label still isn't resolved and its deadline is in the
+  # future — re-checking the cache (which keeps the async refresh alive).
+  defp label_pending?(ev) do
+    case ev[:__label_deadline] do
+      nil ->
+        false
+
+      deadline ->
+        mono() < deadline and
+          is_nil(ClaudeWatch.TabCache.info(ev[:zellij_session], ev[:pane_id]))
+    end
+  end
+
+  defp present?(s), do: is_binary(s) and s != ""
 
   defp rate_limited?(state, key) do
     case state.last_sent[key] do

@@ -16,6 +16,11 @@ config :claude_watch,
   done_window_ms: 0,
   # Permission prompts dedup over a short window (blocking → kept fast).
   permission_window_ms: 1_500,
+  # Only the FIRST notification for a not-yet-resolved zellij pane is held — polled
+  # until its "<tab>:<session>" label resolves, then delivered — capped at this many
+  # ms (the zellij lookup takes ~2s). Warm panes deliver immediately. Override with
+  # CLAUDE_WATCH_COLD_LABEL_MAX_MS.
+  cold_label_max_ms: 5_000,
   # Subagent-finished pings are NOT relayed by default (noisy). Enable with
   # relay_subagent: true (or CLAUDE_WATCH_SUBAGENT=1). When on, a subagent is
   # suppressed if a "done" for the same session follows within

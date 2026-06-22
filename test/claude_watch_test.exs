@@ -138,8 +138,10 @@ defmodule ClaudeWatch.NotifierTest do
     assert log =~ "A:zellij"
   end
 
-  test "label uses the session slug from TabCache when available (<tab>:<slug>)" do
-    Application.put_env(:claude_watch, :done_window_ms, 200)
+  test "first (cold) event waits for its session-name label even with immediate done" do
+    # done is immediate, but a cold pane is held (polled) until the slug lands.
+    Application.put_env(:claude_watch, :done_window_ms, 0)
+    Application.put_env(:claude_watch, :cold_label_max_ms, 2_000)
 
     start_supervised!(
       {ClaudeWatch.TabCache,
@@ -163,7 +165,46 @@ defmodule ClaudeWatch.NotifierTest do
         Process.sleep(400)
       end)
 
-    # Slug wins over the project ("zellij") in the label.
+    # Slug (resolved during the cold wait) wins over the project ("zellij").
     assert log =~ "A:apple-watch-apns-delivery"
+  end
+
+  test "a warm pane delivers immediately (cold wait applies only to the first event)" do
+    Application.put_env(:claude_watch, :done_window_ms, 0)
+    Application.put_env(:claude_watch, :cold_label_max_ms, 5_000)
+
+    start_supervised!(
+      {ClaudeWatch.TabCache, fetcher: fn _ -> %{"7" => %{tab: "A", slug: "warm-sess"}} end}
+    )
+
+    # Warm the cache for pane 7 before the event arrives.
+    ClaudeWatch.TabCache.info("z", "7")
+    Process.sleep(100)
+
+    log =
+      capture_log([level: :info], fn ->
+        start_supervised!(Notifier)
+        Notifier.event(ev(%{kind: "done", session_id: "s1", zellij_session: "z", pane_id: "7"}))
+        # Far below the 5s cold wait — a warm pane must not be delayed.
+        Process.sleep(150)
+      end)
+
+    assert deliveries(log) == 1
+    assert log =~ "A:warm-sess"
+  end
+
+  test "a non-zellij event is not delayed by the cold-label wait" do
+    Application.put_env(:claude_watch, :done_window_ms, 0)
+    Application.put_env(:claude_watch, :cold_label_max_ms, 5_000)
+
+    log =
+      capture_log([level: :info], fn ->
+        start_supervised!(Notifier)
+        # No pane_id / zellij_session → nothing to resolve → no wait.
+        Notifier.event(ev(%{kind: "done", session_id: "s1", project: "p"}))
+        Process.sleep(150)
+      end)
+
+    assert deliveries(log) == 1
   end
 end
