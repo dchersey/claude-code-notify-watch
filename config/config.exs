@@ -10,6 +10,10 @@ config :claude_watch,
   delivery_backend: "pushover",
   ntfy_base: "https://ntfy.sh",
   bark_server: "https://api.day.app",
+  # APNs sound filename. "default" = system sound. A custom sound must be a
+  # ≤30s Linear PCM/.caf bundled in your app; set its filename here or via
+  # CLAUDE_WATCH_APNS_SOUND (only the "apns" backend uses this).
+  apns_sound: "default",
   # "done" (idle / ready-for-input) fires immediately — no debounce. Set >0 to
   # coalesce a burst of done events per session (latest wins) at the cost of
   # latency. Override at runtime with CLAUDE_WATCH_DONE_WINDOW_MS.

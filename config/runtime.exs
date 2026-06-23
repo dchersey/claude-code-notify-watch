@@ -66,6 +66,12 @@ if config_env() != :test do
     end
   end
 
+  # APNs notification sound filename (custom sound must be bundled in the app).
+  case System.get_env("CLAUDE_WATCH_APNS_SOUND") do
+    s when is_binary(s) and s != "" -> config :claude_watch, :apns_sound, String.trim(s)
+    _ -> :ok
+  end
+
   # Relay subagent-finished pings (off by default — noisy).
   case System.get_env("CLAUDE_WATCH_SUBAGENT") do
     s when s in ["1", "true", "yes", "on"] -> config :claude_watch, :relay_subagent, true

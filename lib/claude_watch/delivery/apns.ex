@@ -47,7 +47,7 @@ defmodule ClaudeWatch.Delivery.Apns do
     notification =
       new("", token, topic)
       |> put_alert(%{"title" => title, "body" => body})
-      |> put_sound("default")
+      |> put_sound(Application.get_env(:claude_watch, :apns_sound, "default"))
       |> put_custom(%{"interruption-level" => level(priority)})
       |> collapse(collapse_id)
 
