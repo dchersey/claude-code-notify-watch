@@ -11,8 +11,11 @@ defmodule ClaudeWatch.Delivery do
           :body => String.t(),
           :kind => String.t(),
           :priority => :normal | :high,
-          # APNs collapse id (per session); other backends ignore it.
-          optional(:collapse_id) => String.t() | nil
+          # APNs-only extras (other backends ignore them): collapse id (per session)
+          # + session/ts for the companion app's dashboard.
+          optional(:collapse_id) => String.t() | nil,
+          optional(:session) => String.t() | nil,
+          optional(:ts) => integer() | nil
         }
 
   @callback send(msg) :: :ok | {:error, term}

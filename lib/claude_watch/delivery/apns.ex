@@ -25,8 +25,7 @@ defmodule ClaudeWatch.Delivery.Apns do
       tokens ->
         case Application.get_env(:claude_watch, :apns_topic) do
           topic when is_binary(topic) and topic != "" ->
-            collapse_id = msg[:collapse_id]
-            results = Enum.map(tokens, &push_one(&1, title, body, priority, topic, collapse_id))
+            results = Enum.map(tokens, &push_one(&1, topic, msg))
             if Enum.any?(results, &(&1 == :ok)), do: :ok, else: {:error, :all_failed}
 
           _ ->
@@ -41,15 +40,25 @@ defmodule ClaudeWatch.Delivery.Apns do
     e -> {:error, e}
   end
 
-  defp push_one(token, title, body, priority, topic, collapse_id) do
+  defp push_one(token, topic, msg) do
     import Pigeon.APNS.Notification
+
+    # Top-level custom data the Notification Service Extension reads (userInfo) to
+    # build the per-session dashboard; nils dropped. mutable-content lets that
+    # extension run on every push.
+    custom =
+      %{"session" => msg[:session], "kind" => msg[:kind], "ts" => msg[:ts]}
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
 
     notification =
       new("", token, topic)
-      |> put_alert(%{"title" => title, "body" => body})
+      |> put_alert(%{"title" => msg.title, "body" => msg.body})
       |> put_sound(Application.get_env(:claude_watch, :apns_sound, "default"))
-      |> put_custom(%{"interruption-level" => level(priority)})
-      |> collapse(collapse_id)
+      |> put_interruption_level(level(msg.priority))
+      |> put_mutable_content()
+      |> put_custom(custom)
+      |> collapse(msg[:collapse_id])
 
     case ClaudeWatch.APNS.push(notification) do
       %Pigeon.APNS.Notification{response: :success} ->

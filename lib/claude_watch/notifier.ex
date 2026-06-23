@@ -160,7 +160,10 @@ defmodule ClaudeWatch.Notifier do
       body: body,
       kind: ev.kind,
       priority: priority_for(ev.kind),
-      collapse_id: ev[:session_id]
+      collapse_id: ev[:session_id],
+      # For the companion app's dashboard (carried in the APNs payload's userInfo).
+      session: ev[:session_id],
+      ts: ev[:ts]
     }
 
     case Delivery.send(msg) do
