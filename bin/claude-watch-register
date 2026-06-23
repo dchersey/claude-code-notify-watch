@@ -1,0 +1,44 @@
+#!/bin/bash
+# claude-watch-register — register an Apple device's APNs token with the local
+# claude-watch relay (for the "apns" delivery backend).
+#
+# The seamless path: in the Claude Code app tap "Copy token", let Continuity put
+# it on your Mac's clipboard, then run this with no arguments — it reads the token
+# from the clipboard, the shared secret from the Keychain, and POSTs to the relay
+# on localhost. No LAN, no Local Network permission, no typing the secret.
+#
+#   claude-watch-register            # token from clipboard (pbpaste)
+#   claude-watch-register <token>    # token as an argument
+#   claude-watch-register <token> watch   # device_type "watch" (default: ios)
+#
+# Apple-signed /bin/bash per the global macOS rule.
+set -uo pipefail
+
+URL="${CLAUDE_WATCH_URL:-http://127.0.0.1:4747}"
+TOKEN="${1:-$(pbpaste 2>/dev/null | tr -d '[:space:]')}"
+TYPE="${2:-ios}"
+
+if ! printf '%s' "$TOKEN" | grep -qiE '^[0-9a-f]{64}$'; then
+  echo "Not a valid APNs device token (need 64 hex chars)." >&2
+  echo "Got: '$(printf '%.24s' "$TOKEN")…'" >&2
+  echo "Tip: tap 'Copy token' in the Claude Code app, then run this on your Mac." >&2
+  exit 1
+fi
+
+# Secret: ENV first, else the login Keychain (same item the relay/hook use).
+SECRET="${CLAUDE_WATCH_SECRET:-$(security find-generic-password -s claude-watch-shared-secret -w 2>/dev/null)}"
+HDR=()
+[ -n "$SECRET" ] && HDR=(-H "X-Claude-Watch-Secret: $SECRET")
+
+code="$(curl -sS -o /dev/null -w '%{http_code}' -m 5 -X POST "$URL/register" \
+  -H 'Content-Type: application/json' "${HDR[@]}" \
+  --data-binary "{\"device_token\":\"$TOKEN\",\"device_type\":\"$TYPE\"}" 2>/dev/null)"
+
+case "$code" in
+  200) echo "Registered ✓  ($TYPE token $(printf '%.8s' "$TOKEN")…$(printf '%s' "$TOKEN" | tail -c 6))" ;;
+  401) echo "Relay rejected the shared secret (401). Set it in the Keychain:" >&2
+       echo "  security add-generic-password -U -a \"\$USER\" -s claude-watch-shared-secret -w '<secret>'" >&2
+       echo "or pass CLAUDE_WATCH_SECRET=… ." >&2; exit 1 ;;
+  000) echo "Couldn't reach the relay at $URL — is it running? (curl -s $URL/health)" >&2; exit 1 ;;
+  *)   echo "Relay returned HTTP $code." >&2; exit 1 ;;
+esac
