@@ -106,6 +106,42 @@ In `config/config.exs` (then `./priv/launchd/install.sh` to reload):
 - `relay_subagent` (**false**; `CLAUDE_WATCH_SUBAGENT=1`) — relay subagent pings. `subagent_suppress_window_ms` (8s) applies only when they're enabled.
 - `delivery_backend` — `"pushover"` | `"ntfy"` | `"bark"` | `"log"`.
 - `shared_secret` / `CLAUDE_WATCH_SECRET` — optional `X-Claude-Watch-Secret` header on `POST /claude/event` (the listener is already localhost-only).
+- `snapshot_command` / `CLAUDE_WATCH_SNAPSHOT_CMD` (**off**) — run a command after each `done`, debounced per session; see *Post-`done` hook* below.
+
+## Post-`done` hook — auto-snapshot (optional)
+
+A generic hook can run an arbitrary command after each **done** notification —
+handy for keeping some per-session state fresh while you work. It's **off by
+default**; enable it with `snapshot_command` in `config/config.exs` (or
+`CLAUDE_WATCH_SNAPSHOT_CMD`, e.g. in a gitignored `.env.local`).
+
+It runs **best-effort and async** (never blocks or delays a notification),
+**debounced per zellij session** (`snapshot_min_gap_ms`, default 8s), via
+`/bin/sh -c` with these set in the environment — so the command can act on the
+session that just went idle:
+
+- `ZELLIJ_SESSION_NAME` — the zellij session
+- `CLAUDE_WATCH_CWD` — that session's working directory
+- `CLAUDE_WATCH_SESSION_ID` — the Claude session id
+
+(`PATH` is widened to include `~/.local/bin`, `~/bin`, and Homebrew, so common
+tools resolve under the LaunchAgent's minimal environment.)
+
+### Example: keep a zellij resume layout current
+
+Pair it with **[clauding-snapshot](https://github.com/dchersey/claude-zellij-restore)**,
+which photographs your current zellij session into a `claude-resume` layout you
+can restore after a reboot or `zellij` quit. Point the hook at it and the layout
+stays fresh — rewritten within seconds of any session going idle:
+
+```sh
+# single-quoted so $ZELLIJ_SESSION_NAME expands at run time (the relay sets it per event)
+export CLAUDE_WATCH_SNAPSHOT_CMD='clauding-snapshot -o "$HOME/tmp/clauding-restore-$ZELLIJ_SESSION_NAME.kdl"'
+```
+
+One restore layout is written per zellij session. Snapshots fire on `done`
+(turn-completion), not on raw layout changes — a pane added mid-turn is captured
+on the next `done`.
 
 ## How it works
 
