@@ -38,7 +38,16 @@ config :claude_watch,
   bind_ip: {127, 0, 0, 1},
   # Optional shared secret for POST /claude/event (X-Claude-Watch-Secret header).
   # nil = no check. Recommended once bind_ip is off-loopback.
-  shared_secret: nil
+  shared_secret: nil,
+  # Optional command run (best-effort, async) after each "done" notification — a
+  # generic post-event hook. Runs via `/bin/sh -c` with ZELLIJ_SESSION_NAME,
+  # CLAUDE_WATCH_CWD and CLAUDE_WATCH_SESSION_ID in the environment, so it can act
+  # on the session that just went idle (e.g. refresh a layout/resume snapshot).
+  # nil = disabled. Set via CLAUDE_WATCH_SNAPSHOT_CMD (typically in .env.local).
+  snapshot_command: nil,
+  # Per-zellij-session minimum gap between snapshot runs, so a burst of done events
+  # doesn't hammer the command. Override with CLAUDE_WATCH_SNAPSHOT_MIN_GAP_MS.
+  snapshot_min_gap_ms: 8_000
 
 if config_env() == :test do
   import_config "test.exs"

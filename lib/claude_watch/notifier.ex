@@ -32,7 +32,7 @@ defmodule ClaudeWatch.Notifier do
 
   @impl true
   def init(_opts) do
-    {:ok, %{timers: %{}, pending: %{}, last_sent: %{}}}
+    {:ok, %{timers: %{}, pending: %{}, last_sent: %{}, snapshots: %{}}}
   end
 
   @impl true
@@ -88,7 +88,9 @@ defmodule ClaudeWatch.Notifier do
 
       true ->
         deliver(ev)
-        {:noreply, %{state | last_sent: Map.put(state.last_sent, key, mono())}}
+
+        state = %{state | last_sent: Map.put(state.last_sent, key, mono())}
+        {:noreply, maybe_snapshot(state, ev)}
     end
   end
 
@@ -175,6 +177,78 @@ defmodule ClaudeWatch.Notifier do
     end
   rescue
     e -> Logger.warning("[notifier] delivery crashed: #{inspect(e)}")
+  end
+
+  # Optional best-effort post-"done" hook: run :snapshot_command for the zellij
+  # session that just went idle, debounced per session (:snapshot_min_gap_ms) so a
+  # burst of done events can't hammer it. Async — never blocks or crashes delivery.
+  defp maybe_snapshot(state, %{kind: "done"} = ev) do
+    cmd = cfg(:snapshot_command, nil)
+    sess = ev[:zellij_session]
+
+    cond do
+      not present?(cmd) -> state
+      not present?(sess) -> state
+      snapshot_throttled?(state, sess) -> state
+      true ->
+        run_snapshot(cmd, ev, sess)
+        %{state | snapshots: Map.put(state.snapshots, sess, mono())}
+    end
+  end
+
+  defp maybe_snapshot(state, _ev), do: state
+
+  defp snapshot_throttled?(state, sess) do
+    case state.snapshots[sess] do
+      nil -> false
+      t -> mono() - t < cfg(:snapshot_min_gap_ms, 8_000)
+    end
+  end
+
+  # Fire-and-forget. `/bin/sh -c` so the command can reference the env vars below;
+  # PATH is widened past the LaunchAgent's minimal default so tools like zellij /
+  # python3 resolve. The outcome is logged; a failure is dropped, never propagated.
+  defp run_snapshot(cmd, ev, sess) do
+    home = System.user_home() || System.get_env("HOME") || "."
+
+    env = [
+      {"ZELLIJ_SESSION_NAME", sess},
+      {"CLAUDE_WATCH_CWD", ev[:cwd] || ""},
+      {"CLAUDE_WATCH_SESSION_ID", ev[:session_id] || ""},
+      {"PATH",
+       Enum.join(
+         [
+           Path.join(home, ".local/bin"),
+           Path.join(home, "bin"),
+           "/opt/homebrew/bin",
+           "/usr/bin",
+           "/bin",
+           "/usr/sbin",
+           "/sbin"
+         ],
+         ":"
+       )}
+    ]
+
+    Task.start(fn ->
+      try do
+        case System.cmd("/bin/sh", ["-c", cmd], env: env, stderr_to_stdout: true) do
+          {out, 0} ->
+            Logger.info("[notifier] snapshot (#{sess}): #{summarize(out)}")
+
+          {out, code} ->
+            Logger.warning("[notifier] snapshot (#{sess}) exit #{code}: #{summarize(out)}")
+        end
+      rescue
+        e -> Logger.warning("[notifier] snapshot crashed: #{inspect(e)}")
+      end
+    end)
+  end
+
+  # First non-empty line of command output (clauding-snapshot prints its summary
+  # to stderr, which we fold into stdout).
+  defp summarize(out) do
+    out |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.find("ok", &(&1 != ""))
   end
 
   defp format(%{kind: "done", message: msg} = ev),

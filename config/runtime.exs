@@ -79,6 +79,20 @@ if config_env() != :test do
     _ -> :ok
   end
 
+  # Optional post-"done" command (best-effort, async). Run via /bin/sh -c with
+  # ZELLIJ_SESSION_NAME / CLAUDE_WATCH_CWD / CLAUDE_WATCH_SESSION_ID set.
+  case System.get_env("CLAUDE_WATCH_SNAPSHOT_CMD") do
+    s when is_binary(s) and s != "" -> config :claude_watch, :snapshot_command, s
+    _ -> :ok
+  end
+
+  if v = System.get_env("CLAUDE_WATCH_SNAPSHOT_MIN_GAP_MS") do
+    case Integer.parse(v) do
+      {ms, _} when ms >= 0 -> config :claude_watch, :snapshot_min_gap_ms, ms
+      _ -> :ok
+    end
+  end
+
   # APNs dispatcher (delivery_backend "apns"): configure Pigeon from a .p8 file +
   # key id / team id (env, else login Keychain). Skipped unless the .p8 exists, so
   # the relay still boots on pushover/ntfy/log with no APNs configured. Always :prod.
