@@ -12,7 +12,9 @@ defmodule ClaudeWatch.TabCache do
   stripped) — and refreshes asynchronously. Lookups return instantly (cached,
   possibly slightly stale — these are stable) and never block the Notifier. A miss
   for an unknown pane triggers a bounded background refresh, so a freshly-created
-  pane is picked up within a couple of seconds. Degrades to nil when zellij absent.
+  pane is picked up within a couple of seconds. Degrades to nil when zellij is
+  absent or the event isn't from a zellij pane (empty session/pane id) — the
+  Notifier then labels by the project folder, so the relay works fine without zellij.
   """
   use GenServer
 
@@ -29,7 +31,8 @@ defmodule ClaudeWatch.TabCache do
   Instant: returns the cached value and triggers an async refresh when the entry
   is stale or the pane is unknown. Safe to call when the cache isn't running.
   """
-  def info(session, pane_id) when is_binary(session) and is_binary(pane_id) do
+  def info(session, pane_id)
+      when is_binary(session) and session != "" and is_binary(pane_id) and pane_id != "" do
     case GenServer.whereis(__MODULE__) do
       nil -> nil
       pid -> GenServer.call(pid, {:info, session, pane_id})
@@ -38,10 +41,13 @@ defmodule ClaudeWatch.TabCache do
     :exit, _ -> nil
   end
 
+  # Non-zellij events (empty session/pane) and nil — skip the cache entirely so we
+  # never spawn a pointless `zellij list-panes`; the Notifier then labels by folder.
   def info(_, _), do: nil
 
   @doc "Pre-warm a session's cache (cast; non-blocking). No-op if not running."
-  def warm(session, pane_id) when is_binary(session) and is_binary(pane_id) do
+  def warm(session, pane_id)
+      when is_binary(session) and session != "" and is_binary(pane_id) and pane_id != "" do
     if pid = GenServer.whereis(__MODULE__), do: GenServer.cast(pid, {:warm, session, pane_id})
     :ok
   end

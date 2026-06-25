@@ -79,6 +79,10 @@ the project folder when no session name is known.
 
 ### session label
 
+**zellij is optional.** Without it the relay works exactly the same — the label is
+just the project folder (no `<tab>:` prefix). When zellij *is* present it only
+enriches the label:
+
 The notification is titled `<tab>:<session>` — e.g. `🔐 A:apple-watch-apns-delivery
 — approve?`. When running inside [zellij](https://zellij.dev), `<tab>` is the tab
 name and `<session>` is the **Claude session name** (Claude sets the pane title to
