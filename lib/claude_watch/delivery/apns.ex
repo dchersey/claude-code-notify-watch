@@ -13,7 +13,7 @@ defmodule ClaudeWatch.Delivery.Apns do
   require Logger
 
   @impl true
-  def send(%{title: title, body: body, priority: priority} = msg) do
+  def send(%{title: _, body: _, priority: _} = msg) do
     case ClaudeWatch.Tokens.all() do
       [] ->
         Logger.warning(

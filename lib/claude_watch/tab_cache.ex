@@ -15,7 +15,6 @@ defmodule ClaudeWatch.TabCache do
   pane is picked up within a couple of seconds. Degrades to nil when zellij absent.
   """
   use GenServer
-  require Logger
 
   @ttl_ms 8_000
   # Don't re-fetch a session more often than this when a pane is merely missing

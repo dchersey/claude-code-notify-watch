@@ -187,9 +187,15 @@ defmodule ClaudeWatch.Notifier do
     sess = ev[:zellij_session]
 
     cond do
-      not present?(cmd) -> state
-      not present?(sess) -> state
-      snapshot_throttled?(state, sess) -> state
+      not present?(cmd) ->
+        state
+
+      not present?(sess) ->
+        state
+
+      snapshot_throttled?(state, sess) ->
+        state
+
       true ->
         run_snapshot(cmd, ev, sess)
         %{state | snapshots: Map.put(state.snapshots, sess, mono())}
