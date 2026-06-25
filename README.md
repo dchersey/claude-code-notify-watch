@@ -3,14 +3,14 @@
 [![CI](https://github.com/dchersey/claude-code-notify-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/dchersey/claude-code-notify-watch/actions/workflows/ci.yml)
 [![License: Source Available](https://img.shields.io/badge/license-Source%20Available%20(MIT%20%2B%20Commons%20Clause)-blue.svg)](LICENSE)
 
-Get a notification **on your Apple Watch** when Claude Code finishes, needs your
-permission, or a subagent completes — from any terminal.
+Get a notification **on your iPhone and Apple Watch** when Claude Code finishes,
+needs your permission, or a subagent completes — from any terminal.
 
 Claude Code's built-in cue is terminal-dependent (Kitty raises a macOS
 notification; Apple Terminal just bounces the dock) and doesn't reliably reach
-your wrist. This captures the signal via Claude Code **hooks** and pushes it
-through a service that has an Apple Watch app (Pushover by default; ntfy/Bark
-also supported).
+your phone or wrist. This captures the signal via Claude Code **hooks** and pushes
+it to your iOS devices — through Pushover by default (ntfy/Bark also supported), or
+straight to Apple via native APNs with a dedicated app (see below).
 
 ```
 Claude Code ──hook──▶ ~/.local/bin/claude-watch-notify ──POST 127.0.0.1:4747──▶
@@ -53,6 +53,18 @@ cd ~/.local/share/claude-code-notify-watch && ./priv/launchd/install.sh
 ntfy (free/self-hostable) and Bark are drop-in alternatives — set
 `delivery_backend: "ntfy"` (or `"bark"`) and stash `claude-watch-ntfy-topic`
 (or `claude-watch-bark-key`) in the Keychain.
+
+### Native APNs — your own app (Apple Developer account)
+
+If you have an **Apple Developer account**, the relay can push **straight to Apple**
+(APNs) — no third-party service, lowest latency — to a dedicated open-source companion
+app, **[claude-code-watch](https://github.com/dchersey/claude-code-watch)**, that runs
+on your iPhone and Apple Watch (with a Home dashboard of the latest alert per session).
+Build and sign the app under your team, create a team APNs `.p8` key, then set
+`delivery_backend: "apns"` and register your device. See the
+[companion app's README](https://github.com/dchersey/claude-code-watch#readme) for the
+full credential setup; `bin/claude-watch-register` turns registering the device token
+(copied from the app via Continuity) into a one-liner.
 
 ## What you get
 
