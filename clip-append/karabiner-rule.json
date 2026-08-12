@@ -1,0 +1,15 @@
+{
+  "description": "Option+Shift+V → append clipboard to notes file (clip-append trigger)",
+  "manipulators": [
+    {
+      "type": "basic",
+      "from": {
+        "key_code": "v",
+        "modifiers": { "mandatory": ["option", "shift"] }
+      },
+      "to": [
+        { "shell_command": ": > \"$HOME/.cache/clip-append/trigger\"" }
+      ]
+    }
+  ]
+}

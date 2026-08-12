@@ -159,6 +159,16 @@ One restore layout is written per zellij session. Snapshots fire on `done`
 (turn-completion), not on raw layout changes — a pane added mid-turn is captured
 on the next `done`.
 
+## Extras in this repo
+
+- **[clip-append](clip-append/)** — hotkey → clipboard → local-LLM Markdown
+  formatting → appended to a notes file (NotePlan-friendly collapsible
+  entries). Independent of the relay; shares the repo as part of the same
+  Claude-Code-companion toolkit. See its [README](clip-append/README.md).
+- Related, but living with the zellij fork it depends on:
+  [claude-effort-borders](https://github.com/dchersey/zellij/tree/integration/contrib/claude-effort-borders)
+  colors each zellij pane frame by the Claude session's effort level / model.
+
 ## How it works
 
 - **Capture** — `~/.claude/settings.json` hooks (`Notification` + `SubagentStop`)

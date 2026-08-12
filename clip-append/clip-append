@@ -1,0 +1,160 @@
+#!/bin/bash
+# clip-append — take the current clipboard (text), format it as organized
+# Markdown via qwen on athena, and append it to a notes file under a
+# horizontal-rule + timestamp header. Falls back to appending the raw
+# clipboard when athena is unreachable, the content is too large for the
+# model's 32k window, or the model call fails — a capture must never be lost
+# to a formatting problem.
+#
+# Entry points:
+#
+#   clip-append [/path/to/target.txt]   # direct CLI; optional target param
+#
+#   launchd (co.hersey.clip-append) WatchPaths on ~/.cache/clip-append/trigger
+#   runs this with no args. The trigger file's first line, if an absolute
+#   path, overrides the target — so `echo /path/to/note.txt > trigger` both
+#   fires the listener AND parameterizes it. Empty trigger = default target.
+#   The Karabiner hotkey (Option+Shift+V) just truncates the trigger.
+#
+# Interpreter is Apple-signed /bin/bash on purpose (see ~/.claude/CLAUDE.md):
+# the NotePlan container path is TCC-protected, and a launchd job on Homebrew
+# bash would re-prompt after every `brew upgrade bash`.
+set -uo pipefail
+
+# launchd runs with no locale -> pbpaste in C locale mangles non-ASCII
+# (em-dashes/arrows become "?"). Force UTF-8.
+export LANG=en_US.UTF-8
+
+CACHE="$HOME/.cache/clip-append"
+TRIGGER="$CACHE/trigger"
+STATE="$CACHE/last"
+LOG="$CACHE/append.log"
+DEFAULT_TARGET="${CLIP_APPEND_TARGET:-$HOME/Library/Containers/co.noteplan.NotePlan3/Data/Library/Application Support/co.noteplan.NotePlan3/Notes/Trading/Claude Scratchpad.txt}"
+
+OLLAMA="${OLLAMA_REMOTE:-http://athena.local:11434}"
+QWEN_MODEL="${CLIP_APPEND_MODEL:-qwen3.6:35b-a3b}"
+# Keep prompt + response inside athena's 32k window (~2.4 chars/token, and
+# the formatted response is roughly the size of the input).
+MAX_QWEN_CHARS=40000
+
+mkdir -p "$CACHE"
+
+target="${1:-}"
+if [ -z "$target" ] && [ -s "$TRIGGER" ]; then
+  override=$(head -n 1 "$TRIGGER")
+  case "$override" in /*) target="$override" ;; esac
+fi
+target="${target:-$DEFAULT_TARGET}"
+
+content=$(pbpaste 2>/dev/null || true)
+if [ -z "$content" ]; then
+  echo "$(date '+%F %T') skip: clipboard empty or non-text" >> "$LOG"
+  exit 0
+fi
+
+# Debounce: launchd can fire more than once for a single trigger write
+# (create + write vnode events), so skip if we just appended this exact
+# clipboard within the last 5 seconds.
+hash=$(printf '%s' "$content" | /usr/bin/shasum -a 256 | cut -d' ' -f1)
+now=$(date +%s)
+if [ -f "$STATE" ]; then
+  read -r last_hash last_ts < "$STATE" || true
+  if [ "$hash" = "${last_hash:-}" ] && [ $(( now - ${last_ts:-0} )) -lt 5 ]; then
+    exit 0
+  fi
+fi
+printf '%s %s\n' "$hash" "$now" > "$STATE"
+
+# Keep the raw capture on disk before anything else touches it.
+printf '%s' "$content" > "$CACHE/last-raw.txt"
+
+# --- qwen formatting pass (best-effort; raw fallback on any failure) --------
+format_with_qwen() {
+  # stdout = formatted markdown; non-zero return = use raw
+  [ ${#content} -le "$MAX_QWEN_CHARS" ] || return 1
+  curl -s --max-time 4 "$OLLAMA/api/version" >/dev/null 2>&1 || return 1
+
+  local payload response formatted
+  payload=$(jq -n --arg content "$content" --arg model "$QWEN_MODEL" '{
+    model: $model,
+    stream: false,
+    think: false,
+    options: {temperature: 0.2, num_ctx: 32768, num_predict: -1},
+    messages: [
+      {role: "system", content: "You are a technical editor. Reformat the raw notes the user provides into clean, well-organized Markdown. Requirements:\n- Organize into logical sections with ## subheadings (and ### where useful) so each topic is a self-contained block.\n- Convert any box-drawing (Unicode) tables into proper Markdown tables.\n- Use bullet lists and numbered lists where the source is list-like.\n- Render action items / pending steps as Markdown checklists (- [ ]).\n- Preserve ALL facts, numbers, and technical vocabulary exactly — do not summarize away content, do not invent content, do not editorialize.\n- Quoted user remarks (lines starting with ❯) may be kept as blockquotes.\n- Begin with exactly ONE concise level-2 heading (## Title) that titles the whole capture. Every other heading must be level-3 (###) or deeper — never # or a second ##.\n- Do NOT wrap the output in a code fence.\nOutput ONLY the Markdown, no preamble."},
+      {role: "user", content: $content}
+    ]
+  }') || return 1
+
+  response=$(curl -s --max-time 480 "$OLLAMA/api/chat" -d "$payload") || return 1
+  formatted=$(printf '%s' "$response" | jq -r '.message.content // empty') || return 1
+  [ -n "$formatted" ] || return 1
+  printf '%s' "$formatted"
+}
+
+# Enforce the collapsible-entry shape regardless of what qwen emits: exactly
+# one leading ## title, every other heading demoted uniformly to ### or
+# deeper (hierarchy preserved), so NotePlan can fold the whole entry at the
+# ## line. Heading-looking lines inside code fences are left alone.
+normalize_headings() {
+  awk '
+    { lines[NR] = $0 }
+    END {
+      start = 1
+      while (start <= NR && lines[start] ~ /^[ \t]*$/) start++
+      title = ""
+      body_start = start
+      if (start <= NR && lines[start] ~ /^#+[ \t]/) {
+        title = lines[start]
+        sub(/^#+[ \t]+/, "", title)
+        body_start = start + 1
+      }
+      if (title == "") title = "Notes"
+      infence = 0; minlev = 99
+      for (i = body_start; i <= NR; i++) {
+        l = lines[i]
+        if (l ~ /^(```|~~~)/) { infence = !infence; continue }
+        if (!infence && l ~ /^#+[ \t]/) {
+          n = 0; while (substr(l, n + 1, 1) == "#") n++
+          if (n < minlev) minlev = n
+        }
+      }
+      delta = (minlev < 3) ? 3 - minlev : 0
+      print "## " title
+      infence = 0
+      for (i = body_start; i <= NR; i++) {
+        l = lines[i]
+        if (l ~ /^(```|~~~)/) { infence = !infence; print l; continue }
+        if (!infence && delta > 0 && l ~ /^#+[ \t]/) {
+          pre = ""
+          for (j = 0; j < delta; j++) pre = pre "#"
+          print pre l
+        } else print l
+      }
+    }
+  '
+}
+
+ts=$(date '+%Y-%m-%d %H:%M:%S')
+started=$(date +%s)
+if body=$(format_with_qwen); then
+  body=$(printf '%s\n' "$body" | normalize_headings)
+  mode="qwen ($(( $(date +%s) - started ))s)"
+else
+  body="$content"; mode="raw"
+fi
+
+# Entry header: rule, timestamp as plain text directly under it, blank line,
+# then the ## -titled body. Note the fold tradeoff (David's choice): when the
+# PREVIOUS entry is collapsed, NotePlan folds everything up to the next
+# heading, so the rule + timestamp line disappear into that fold — the entry's
+# ## title line is what stays visible as the boundary in collapsed view.
+# The blank line before `---` matters — without it Markdown reads the rule as
+# a setext-heading underline for whatever line precedes it.
+{
+  printf '\n---\n'
+  printf '%s\n' "$ts"
+  printf '%s\n' "$body"
+} >> "$target" || { echo "$(date '+%F %T') ERROR appending to $target" >> "$LOG"; exit 1; }
+
+echo "$(date '+%F %T') appended ${#body} chars [$mode] -> $target" >> "$LOG"
