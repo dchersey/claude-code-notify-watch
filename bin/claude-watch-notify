@@ -31,10 +31,28 @@ printf '%s' "$INPUT" | "$JQ" -e . >/dev/null 2>&1 || exit 0
 KIND="$(printf '%s' "$INPUT" | "$JQ" -r '
   ( .hook_event_name // "" ) as $ev | ( .notification_type // "" ) as $nt |
   if   $ev == "SubagentStop"      then "subagent"
+  elif $ev == "Stop"              then "done"
   elif $nt == "idle_prompt"       then "done"
   elif $nt == "permission_prompt" then "permission"
   else "notify" end' 2>/dev/null)"
 case "$KIND" in done|permission|subagent) ;; *) exit 0 ;; esac
+
+# Per-session "done" throttle. The Stop hook fires an immediate "done" on EVERY turn,
+# and Notification/idle_prompt fires another ~60s later — and rapid interactive turns
+# would each buzz. Collapse to at most one "done" per session per DONE_MIN_GAP seconds:
+# the first fires instantly, the rest are dropped. Only "done" is throttled (permission
+# and subagent are untouched). Stamp lives in $TMPDIR, keyed by session id.
+if [ "$KIND" = "done" ]; then
+  SID="$(printf '%s' "$INPUT" | "$JQ" -r '.session_id // ""' 2>/dev/null)"
+  if [ -n "$SID" ]; then
+    GAP="${CLAUDE_WATCH_DONE_MIN_GAP:-90}"
+    STAMP="${TMPDIR:-/tmp}/claude-watch-done-${SID}"
+    NOW="$(date +%s)"; LAST="$(cat "$STAMP" 2>/dev/null || echo 0)"
+    case "$LAST" in ''|*[!0-9]*) LAST=0 ;; esac
+    if [ $((NOW - LAST)) -lt "$GAP" ]; then exit 0; fi
+    printf '%s' "$NOW" > "$STAMP" 2>/dev/null
+  fi
+fi
 
 # Send this pane's zellij identity (pane id + session); the RELAY resolves the tab
 # name from these (cached). Keeps the hook INSTANT — no `zellij list-panes` here,

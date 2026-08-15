@@ -70,12 +70,20 @@ full credential setup; `bin/claude-watch-register` turns registering the device 
 
 | Claude Code hook | Notification |
 |---|---|
-| `Notification` / `idle_prompt` | ✅ `<tab>:<session>` — done |
+| `Stop` | ✅ `<tab>:<session>` — done *(immediate, on every turn)* |
+| `Notification` / `idle_prompt` | ✅ `<tab>:<session>` — done *(~60s idle fallback if `Stop` was missed)* |
 | `Notification` / `permission_prompt` | 🔐 `<tab>:<session>` — approve? *(high priority)* |
 | `SubagentStop` | 🤖 `<agent>` done — `<tab>:<session>` *(off by default)* |
 
 `<tab>:<session>` identifies which session needs you (see below); it falls back to
 the project folder when no session name is known.
+
+**`done` throttle.** `Stop` fires the instant a turn finishes — no "away from
+terminal" gate and no ~60s wait, unlike `idle_prompt`. Because it fires on *every*
+turn, `claude-watch-notify` throttles `done` to at most one per session per
+`CLAUDE_WATCH_DONE_MIN_GAP` seconds (default 90): the first fires immediately, and
+the follow-up `idle_prompt` (plus any rapid interactive turns) collapse into it. So
+you get an instant buzz when a task finishes without a double-buzz or per-turn spam.
 
 ### session label
 
@@ -171,9 +179,11 @@ on the next `done`.
 
 ## How it works
 
-- **Capture** — `~/.claude/settings.json` hooks (`Notification` + `SubagentStop`)
-  run `claude-watch-notify`, which maps the event to `{kind, project, pane_id, …}`
-  and POSTs it to the relay, fully detached (and instant — no zellij call).
+- **Capture** — `~/.claude/settings.json` hooks (`Stop` + `Notification` +
+  `SubagentStop`) run `claude-watch-notify`, which maps the event to
+  `{kind, project, pane_id, …}` and POSTs it to the relay, fully detached (and
+  instant — no zellij call). `Stop` gives an immediate `done`; a per-session throttle
+  keeps it from double-buzzing with the `idle_prompt` fallback.
 - **Relay** — an Elixir/OTP app (Bandit on `127.0.0.1:4747`): a `Notifier`
   GenServer debounces per session, then a pluggable `Delivery` backend pushes.
   Credentials come from the macOS Keychain (or env), always trimmed.
