@@ -37,18 +37,26 @@ KIND="$(printf '%s' "$INPUT" | "$JQ" -r '
   else "notify" end' 2>/dev/null)"
 case "$KIND" in done|permission|subagent) ;; *) exit 0 ;; esac
 
-# Per-session "done" throttle. The Stop hook fires an immediate "done" on EVERY turn,
-# and Notification/idle_prompt fires another ~60s later — and rapid interactive turns
-# would each buzz. Collapse to at most one "done" per session per DONE_MIN_GAP seconds:
-# the first fires instantly, the rest are dropped. Only "done" is throttled (permission
-# and subagent are untouched). Stamp lives in $TMPDIR, keyed by session id.
+# Per-session "done" de-dup. Two hooks produce "done": Stop (immediate, every turn) and
+# Notification/idle_prompt (~60s later) — the latter is a redundant ECHO whenever Stop
+# already fired. Stamp the last "done" per session in a STABLE dir ($HOME/.cache, NOT
+# $TMPDIR, which can differ between hook-invocation contexts and would hide the stamp).
+# Kind-aware windows:
+#   * Stop        -> throttle rapid repeats to CLAUDE_WATCH_DONE_MIN_GAP (default 90s).
+#   * idle_prompt -> a pure fallback: fire only if NO "done" went out within
+#     CLAUDE_WATCH_IDLE_ECHO_GAP (default 150s > the ~60s idle delay + its variance), so
+#     the echo is swallowed when Stop is active but idle still covers Stop-less sessions.
+# Only "done" is gated; permission and subagent are untouched.
 if [ "$KIND" = "done" ]; then
   SID="$(printf '%s' "$INPUT" | "$JQ" -r '.session_id // ""' 2>/dev/null)"
   if [ -n "$SID" ]; then
-    GAP="${CLAUDE_WATCH_DONE_MIN_GAP:-90}"
-    STAMP="${TMPDIR:-/tmp}/claude-watch-done-${SID}"
+    SRC="$(printf '%s' "$INPUT" | "$JQ" -r '.hook_event_name // ""' 2>/dev/null)"
+    dir="$HOME/.cache/claude-watch"; mkdir -p "$dir" 2>/dev/null
+    STAMP="$dir/done-${SID}"
     NOW="$(date +%s)"; LAST="$(cat "$STAMP" 2>/dev/null || echo 0)"
     case "$LAST" in ''|*[!0-9]*) LAST=0 ;; esac
+    if [ "$SRC" = "Stop" ]; then GAP="${CLAUDE_WATCH_DONE_MIN_GAP:-90}"
+    else GAP="${CLAUDE_WATCH_IDLE_ECHO_GAP:-150}"; fi
     if [ $((NOW - LAST)) -lt "$GAP" ]; then exit 0; fi
     printf '%s' "$NOW" > "$STAMP" 2>/dev/null
   fi

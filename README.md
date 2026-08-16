@@ -78,12 +78,19 @@ full credential setup; `bin/claude-watch-register` turns registering the device 
 `<tab>:<session>` identifies which session needs you (see below); it falls back to
 the project folder when no session name is known.
 
-**`done` throttle.** `Stop` fires the instant a turn finishes — no "away from
-terminal" gate and no ~60s wait, unlike `idle_prompt`. Because it fires on *every*
-turn, `claude-watch-notify` throttles `done` to at most one per session per
-`CLAUDE_WATCH_DONE_MIN_GAP` seconds (default 90): the first fires immediately, and
-the follow-up `idle_prompt` (plus any rapid interactive turns) collapse into it. So
-you get an instant buzz when a task finishes without a double-buzz or per-turn spam.
+**`done` de-dup.** `Stop` fires the instant a turn finishes — no "away from terminal"
+gate and no ~60s wait, unlike `idle_prompt`. `claude-watch-notify` keeps the two from
+double-buzzing with a per-session stamp (in `$HOME/.cache/claude-watch/`, a stable path
+so every hook-invocation context shares it), kind-aware:
+
+- **`Stop`** — throttled to one per `CLAUDE_WATCH_DONE_MIN_GAP` seconds (default 90), so
+  distinct task completions each buzz but rapid interactive turns don't spam.
+- **`idle_prompt`** — a pure fallback: it fires only if no `done` went out within
+  `CLAUDE_WATCH_IDLE_ECHO_GAP` seconds (default 150, comfortably past the ~60s idle delay
+  and its variance). So when `Stop` is active the ~60s echo is swallowed, while sessions
+  with no `Stop` hook still get the idle notification.
+
+The result: an instant buzz when a task finishes, no echo 60s later, and no per-turn spam.
 
 ### session label
 
