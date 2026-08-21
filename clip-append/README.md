@@ -49,9 +49,10 @@ and nothing to clobber.
 *foreground* editor, a background `addText` with `openNote=no` writes the file but
 the editor keeps a stale buffer and saves over the append ~1s later (the capture
 is silently lost). So the worker passes **`openNote=yes`**, which makes NotePlan
-*reload* the note as it appends, keeping the editor in sync. Cost: the note gets
-focused. Set `CLIP_APPEND_OPEN_NOTE=no` if you never view the target note while
-capturing (skips the reload, no focus change).
+*reload* the note as it appends, keeping the editor in sync. This also focuses the
+note — a handy confirmation the capture landed. Set `CLIP_APPEND_OPEN_NOTE=no` if
+you'd rather it stay a silent background append (safe as long as the note isn't
+open in the foreground).
 
 URL length is the remaining caveat: a capture of a few thousand characters is
 fine (tested well past 7 KB of body, unicode and all); an extreme raw paste could
