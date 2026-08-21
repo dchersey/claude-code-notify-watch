@@ -2,17 +2,22 @@
 
 Press a hotkey → the current clipboard is reformatted into clean, organized
 Markdown by a **local LLM** (qwen on an [Ollama](https://ollama.com) box) and
-appended to a notes file with a timestamp header. Built for capturing snippets
-of Claude Code conversations into a [NotePlan](https://noteplan.co) note, but
-the target is any text file.
+written into a [NotePlan](https://noteplan.co) note under a timestamp header.
+By default it appends to **one note per day**, titled `MM-DD-YY`, in the
+`Claude Code` folder — created on the day's first capture. It writes *through*
+NotePlan (see [Write-through](#write-through-not-a-file-append)); a plain-file
+target still works too.
 
 ```
 Option+Shift+V (Karabiner) ──touch──▶ ~/.cache/clip-append/trigger
         └─▶ launchd WatchPaths ──▶ /bin/bash ~/bin/clip-append
-                └─▶ pbpaste ─▶ qwen via Ollama (format to Markdown) ─▶ append:
+                └─▶ pbpaste ─▶ qwen via Ollama (format to Markdown)
+                          └─▶ NotePlan x-callback addText (create-or-append):
+
+                    # 08-21-26                 ← note title (day's first capture)
 
                     ---
-                    2026-08-12 09:44:02
+                    2026-08-21 09:44:02
                     ## Title Qwen Chose
                     ### Section…
 ```
@@ -22,6 +27,26 @@ capture with every other heading demoted to `###`+ (enforced by a deterministic
 post-pass — the model is *asked* for that shape, but a normalizer guarantees
 it), so a long scratchpad folds into a list of one-line titles for easy
 review-and-trim.
+
+## Write-through, not a file append
+
+clip-append does **not** write the note file directly. NotePlan keeps notes it
+has loaded in memory and **overwrites external edits** to that file on its next
+save/sync — so a raw `>>` append races NotePlan and can be silently clobbered a
+second or two later (exactly what began happening after a reboot left NotePlan
+holding the note). Instead the worker hands the text to NotePlan via the
+`addText` x-callback URL:
+
+```
+noteplan://x-callback-url/addText?fileName=<folder/note.txt>&mode=append&text=<…>
+```
+
+NotePlan is then the *sole* writer: `addText` **creates** the note when its file
+is missing and **appends** when it exists, so there is no external-write conflict
+and nothing to clobber. The one caveat is URL length — a capture of a few
+thousand characters is fine (tested well past 7 KB of body); an extreme raw
+paste could in principle exceed the URL limit, but the raw text is always saved
+to `last-raw.txt` regardless.
 
 ## Reliability properties
 
@@ -41,7 +66,7 @@ review-and-trim.
 
 | File | What it is |
 |------|------------|
-| `clip-append` | The worker: pbpaste → qwen (with raw fallback) → append. |
+| `clip-append` | The worker: pbpaste → qwen (raw fallback) → NotePlan write-through. |
 | `co.hersey.clip-append.plist` | launchd agent: WatchPaths on the trigger file. |
 | `karabiner-rule.json` | Karabiner-Elements complex-modification rule for Option+Shift+V. |
 
@@ -76,18 +101,24 @@ CLI run):
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `CLIP_APPEND_TARGET` | the NotePlan Trading scratchpad | Default notes file to append to. |
+| `CLIP_APPEND_FOLDER` | `Claude Code` | NotePlan folder for the daily note. |
+| `CLIP_APPEND_TITLE` | today, `MM-DD-YY` | Note title/filename (one note per day by default). |
+| `CLIP_APPEND_NP_ROOT` | NotePlan's `Notes` container dir | Root that `fileName` is relative to. |
+| `CLIP_APPEND_TARGET` | *(unset)* | Legacy absolute-path override (see below). |
 | `OLLAMA_REMOTE` | `http://athena.local:11434` | Ollama endpoint. |
 | `CLIP_APPEND_MODEL` | `qwen3.6:35b-a3b` | Model for the formatting pass. |
 
-Per-capture target override, no config needed — the trigger file's first line,
-if an absolute path, becomes the target for that capture:
+Per-capture target override, no config needed — the trigger file's first line
+(or the CLI arg) sets the target for that capture. A path **inside** NotePlan's
+notes tree (relative, or absolute under `CLIP_APPEND_NP_ROOT`) is written through
+NotePlan; an absolute path **outside** it is appended to as a plain file:
 
 ```sh
-echo /path/to/other-note.txt > ~/.cache/clip-append/trigger   # fires AND redirects
+echo "Meetings/Standup.txt" > ~/.cache/clip-append/trigger   # NotePlan note: fires + redirects
+echo /tmp/scratch.md        > ~/.cache/clip-append/trigger   # plain file: direct append
 ```
 
-Or run directly: `clip-append /path/to/other-note.txt`.
+Or run directly: `clip-append "Meetings/Standup.txt"`.
 
 Note the model's context budget: content over ~40k chars skips the model and
 appends raw (the formatting request + response must fit the serving window —
@@ -123,8 +154,10 @@ Triage order when a capture doesn't appear:
    then whether Karabiner's virtual keyboard driver is running — after a
    Karabiner self-update the driver extension needs re-approval in System
    Settings and keeps ALL rules dead until approved.
-3. NotePlan lag: the file append is instant; NotePlan can take seconds to
-   notice an external change. Trust the log, not the window.
+3. Write path: entries go in via NotePlan's `addText` x-callback, so NotePlan
+   renders them itself — no external-change lag and no clobber. If a capture is
+   missing, check the log for its `-> NotePlan:<file>` target line; a `[raw]`
+   tag just means the model pass fell back but the text still went in.
 
 ## Related
 

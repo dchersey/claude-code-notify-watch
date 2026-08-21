@@ -29,7 +29,16 @@ CACHE="$HOME/.cache/clip-append"
 TRIGGER="$CACHE/trigger"
 STATE="$CACHE/last"
 LOG="$CACHE/append.log"
-DEFAULT_TARGET="${CLIP_APPEND_TARGET:-$HOME/Library/Containers/co.noteplan.NotePlan3/Data/Library/Application Support/co.noteplan.NotePlan3/Notes/Trading/Claude Scratchpad.txt}"
+# NotePlan write-through target. We append THROUGH NotePlan (x-callback `addText`), not
+# by writing the note file directly: NotePlan overwrites external edits to a note it has
+# loaded, which silently ate captures after a reboot. `addText` creates the note when the
+# fileName is missing and appends otherwise, so NotePlan stays the sole writer — no clobber.
+# Default target: one note PER DAY, titled MM-DD-YY, in the "Claude Code" folder.
+NP_ROOT="${CLIP_APPEND_NP_ROOT:-$HOME/Library/Containers/co.noteplan.NotePlan3/Data/Library/Application Support/co.noteplan.NotePlan3/Notes}"
+NP_FOLDER="${CLIP_APPEND_FOLDER:-Claude Code}"
+NP_TITLE="${CLIP_APPEND_TITLE:-$(date '+%m-%d-%y')}"   # MM-DD-YY
+DEFAULT_FILENAME="$NP_FOLDER/$NP_TITLE.txt"            # relative to NP_ROOT
+LEGACY_TARGET="${CLIP_APPEND_TARGET:-}"               # abs path override still honored
 
 OLLAMA="${OLLAMA_REMOTE:-http://athena.local:11434}"
 QWEN_MODEL="${CLIP_APPEND_MODEL:-qwen3.6:35b-a3b}"
@@ -39,12 +48,25 @@ MAX_QWEN_CHARS=40000
 
 mkdir -p "$CACHE"
 
-target="${1:-}"
-if [ -z "$target" ] && [ -s "$TRIGGER" ]; then
-  override=$(head -n 1 "$TRIGGER")
-  case "$override" in /*) target="$override" ;; esac
+# Override precedence: CLI arg > trigger first line (if a path) > CLIP_APPEND_TARGET env.
+override="${1:-}"
+if [ -z "$override" ] && [ -s "$TRIGGER" ]; then
+  first=$(head -n 1 "$TRIGGER"); case "$first" in /*) override="$first" ;; esac
 fi
-target="${target:-$DEFAULT_TARGET}"
+[ -z "$override" ] && override="$LEGACY_TARGET"
+
+# Resolve to a NotePlan note (relative fileName -> x-callback write-through) or, only for
+# an absolute path OUTSIDE the NotePlan notes tree, a plain file we append to directly.
+np_filename=""; legacy_file=""
+if [ -z "$override" ]; then
+  np_filename="$DEFAULT_FILENAME"
+else
+  case "$override" in
+    "$NP_ROOT"/*) np_filename="${override#"$NP_ROOT"/}" ;;  # abs path inside NotePlan notes
+    /*)           legacy_file="$override" ;;                # abs path elsewhere: direct append
+    *)            np_filename="$override" ;;                # relative: NotePlan fileName
+  esac
+fi
 
 content=$(pbpaste 2>/dev/null || true)
 if [ -z "$content" ]; then
@@ -144,17 +166,28 @@ else
   body="$content"; mode="raw"
 fi
 
-# Entry header: rule, timestamp as plain text directly under it, blank line,
-# then the ## -titled body. Note the fold tradeoff (David's choice): when the
-# PREVIOUS entry is collapsed, NotePlan folds everything up to the next
-# heading, so the rule + timestamp line disappear into that fold — the entry's
-# ## title line is what stays visible as the boundary in collapsed view.
-# The blank line before `---` matters — without it Markdown reads the rule as
-# a setext-heading underline for whatever line precedes it.
-{
-  printf '\n---\n'
-  printf '%s\n' "$ts"
-  printf '%s\n' "$body"
-} >> "$target" || { echo "$(date '+%F %T') ERROR appending to $target" >> "$LOG"; exit 1; }
+# Entry = blank line + horizontal rule + timestamp + the ## -titled body. The leading
+# blank line before `---` matters (else Markdown reads it as a setext-heading underline
+# for the preceding line). The fold tradeoff (David's choice): when the PREVIOUS entry is
+# collapsed, NotePlan folds up to the next heading, so the rule + timestamp fold away and
+# the entry's ## title is the visible boundary.
+entry=$(printf '\n\n---\n%s\n%s' "$ts" "$body")
 
-echo "$(date '+%F %T') appended ${#body} chars [$mode] -> $target" >> "$LOG"
+if [ -n "$np_filename" ]; then
+  # Write THROUGH NotePlan (x-callback addText): creates the note when its file is missing,
+  # appends otherwise, and NotePlan is the sole writer so it can't clobber the capture. A
+  # brand-new day's note (file not yet on disk) gets an H1 title line so its subject is the date.
+  np_abs="$NP_ROOT/$np_filename"
+  if [ -f "$np_abs" ]; then text="$entry"; else text="# $NP_TITLE$entry"; fi
+  enc_name=$(jq -rn --arg s "$np_filename" '$s|@uri')
+  enc_text=$(jq -rn --arg s "$text" '$s|@uri')
+  if /usr/bin/open -g "noteplan://x-callback-url/addText?fileName=$enc_name&mode=append&openNote=no&text=$enc_text"; then
+    echo "$(date '+%F %T') appended ${#body} chars [$mode] -> NotePlan:$np_filename" >> "$LOG"
+  else
+    echo "$(date '+%F %T') ERROR x-callback addText -> $np_filename" >> "$LOG"; exit 1
+  fi
+else
+  # Legacy: a plain non-NotePlan file, appended directly.
+  printf '%s\n' "$entry" >> "$legacy_file" || { echo "$(date '+%F %T') ERROR appending to $legacy_file" >> "$LOG"; exit 1; }
+  echo "$(date '+%F %T') appended ${#body} chars [$mode] -> $legacy_file" >> "$LOG"
+fi
