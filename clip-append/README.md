@@ -43,10 +43,20 @@ noteplan://x-callback-url/addText?fileName=<folder/note.txt>&mode=append&text=<�
 
 NotePlan is then the *sole* writer: `addText` **creates** the note when its file
 is missing and **appends** when it exists, so there is no external-write conflict
-and nothing to clobber. The one caveat is URL length — a capture of a few
-thousand characters is fine (tested well past 7 KB of body); an extreme raw
-paste could in principle exceed the URL limit, but the raw text is always saved
-to `last-raw.txt` regardless.
+and nothing to clobber.
+
+**One more wrinkle — the open editor.** If the target note is open in NotePlan's
+*foreground* editor, a background `addText` with `openNote=no` writes the file but
+the editor keeps a stale buffer and saves over the append ~1s later (the capture
+is silently lost). So the worker passes **`openNote=yes`**, which makes NotePlan
+*reload* the note as it appends, keeping the editor in sync. Cost: the note gets
+focused. Set `CLIP_APPEND_OPEN_NOTE=no` if you never view the target note while
+capturing (skips the reload, no focus change).
+
+URL length is the remaining caveat: a capture of a few thousand characters is
+fine (tested well past 7 KB of body, unicode and all); an extreme raw paste could
+in principle exceed the URL limit — but the raw text is always saved to
+`last-raw.txt` regardless.
 
 ## Reliability properties
 
@@ -104,6 +114,7 @@ CLI run):
 | `CLIP_APPEND_FOLDER` | `Claude Code` | NotePlan folder for the daily note. |
 | `CLIP_APPEND_TITLE` | today, `MM-DD-YY` | Note title/filename (one note per day by default). |
 | `CLIP_APPEND_NP_ROOT` | NotePlan's `Notes` container dir | Root that `fileName` is relative to. |
+| `CLIP_APPEND_OPEN_NOTE` | `yes` | Reload the note on append so an open editor can't clobber it; `no` skips the reload (no focus change). |
 | `CLIP_APPEND_TARGET` | *(unset)* | Legacy absolute-path override (see below). |
 | `OLLAMA_REMOTE` | `http://athena.local:11434` | Ollama endpoint. |
 | `CLIP_APPEND_MODEL` | `qwen3.6:35b-a3b` | Model for the formatting pass. |

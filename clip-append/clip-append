@@ -39,6 +39,12 @@ NP_FOLDER="${CLIP_APPEND_FOLDER:-Claude Code}"
 NP_TITLE="${CLIP_APPEND_TITLE:-$(date '+%m-%d-%y')}"   # MM-DD-YY
 DEFAULT_FILENAME="$NP_FOLDER/$NP_TITLE.txt"            # relative to NP_ROOT
 LEGACY_TARGET="${CLIP_APPEND_TARGET:-}"               # abs path override still honored
+# openNote=yes makes NotePlan RELOAD the note as it appends. Required when the note is
+# open in NotePlan's foreground editor: with openNote=no, addText writes the file but the
+# open editor keeps a stale buffer and saves over the append ~1s later (the capture is
+# lost). Reloading keeps the editor in sync. Cost: it focuses the note. Set
+# CLIP_APPEND_OPEN_NOTE=no if you never view the target note while capturing.
+NP_OPEN="${CLIP_APPEND_OPEN_NOTE:-yes}"
 
 OLLAMA="${OLLAMA_REMOTE:-http://athena.local:11434}"
 QWEN_MODEL="${CLIP_APPEND_MODEL:-qwen3.6:35b-a3b}"
@@ -181,7 +187,7 @@ if [ -n "$np_filename" ]; then
   if [ -f "$np_abs" ]; then text="$entry"; else text="# $NP_TITLE$entry"; fi
   enc_name=$(jq -rn --arg s "$np_filename" '$s|@uri')
   enc_text=$(jq -rn --arg s "$text" '$s|@uri')
-  if /usr/bin/open -g "noteplan://x-callback-url/addText?fileName=$enc_name&mode=append&openNote=no&text=$enc_text"; then
+  if /usr/bin/open -g "noteplan://x-callback-url/addText?fileName=$enc_name&mode=append&openNote=$NP_OPEN&text=$enc_text"; then
     echo "$(date '+%F %T') appended ${#body} chars [$mode] -> NotePlan:$np_filename" >> "$LOG"
   else
     echo "$(date '+%F %T') ERROR x-callback addText -> $np_filename" >> "$LOG"; exit 1
